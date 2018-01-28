@@ -135,8 +135,10 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
 
     def button_search_contact_clicked(self):
         result = self.client.search_contact(self.lineEdit.text())
+        print(result)
         if result:
             self.listWidget_2.insertItem(CustomListItem(self.lineEdit.text(), result))
+            
             
     def contact_list_item_selected(self):
         item = self.listWidget_contacts.currentItem()

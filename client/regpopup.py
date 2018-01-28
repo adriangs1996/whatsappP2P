@@ -62,8 +62,10 @@ class Ui_Dialog(QtWidgets.QDialog):
         self.Accepted = False
         try:
             reply = self.client.register(self.lineEdit.text())
+            print('sent register request')
         except:
-            self.Accepted = False            
+            self.Accepted = False      
+            print('request failed')      
             mssg = QtWidgets.QMessageBox(parent= self)
             mssg.setInformativeText('Server offline, please try again later')
             mssg.setStandardButtons(QtWidgets.QMessageBox.Close)

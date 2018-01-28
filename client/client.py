@@ -5,6 +5,7 @@ import socket
 from myqueue import Queue as myQueue
 from threading import Thread
 from random import randint
+loads = cloudpickle.loads
 
 class Client:  
 
@@ -78,6 +79,7 @@ class Client:
         for t_ip,t_port in self.servers:
             try:
                 reply = request_tracker_action(t_ip, t_port, 'register_client', user= username, ip= self.ip, port= self.port)
+                print('sent request from client')
                 if reply:
                     self.registered = True
                     self.username = username
@@ -86,6 +88,7 @@ class Client:
                 continue
 
             if not reply:
+                print('not reply')
                 raise Exception
 
         return self.registered
@@ -316,10 +319,12 @@ class Client:
         for t_ip,t_port in self.servers:
             try:
                 reply = request_tracker_action(t_ip, t_port, 'locate', user= contact_name)
-            except:
+                print(reply)
+            except NoResponseException:
+                print('entered exception')
                 return None
-            else:
-                return reply
+            
+            return reply
 
     def delete_contact(self, contact_name):
         self.contacts_info.pop(contact_name)
@@ -538,7 +543,7 @@ def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
     # clients should test for a server response to know whether
     # it's active, or is down.
     tries = 8
-    timeout = 1000
+    timeout = 10
     while tries:
         if client_sock.poll(timeout=timeout, flags=zmq.POLLIN):
             break
@@ -547,9 +552,9 @@ def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
     # No server response
     if not tries:
         client_sock.close()
-        raise Exception
+        raise NoResponseException()
 
-    response = client_sock.recv_json()['response']
+    response = client_sock.recv_pyobj()
     if isinstance(response, list):
         rep = []
         for message in response:
@@ -558,3 +563,7 @@ def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
 
     client_sock.close()
     return response
+
+
+class NoResponseException(Exception):
+    pass
