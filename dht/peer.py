@@ -169,7 +169,12 @@ class Peer:
         - colocar el nuevo nodo despues de uno mismo (conventirlo en nuestro sucesor)
         - reasignar una parte de nuestro espacio de llaves al nuevo nodo.
         '''
-        pass
+        self.chain = [(key, url)] + self.chain
+
+        for i in range(CHORDS):
+            key = (self.key + 2**i) % MAX_KEY
+            if self.chords[i] is None and not belongs_to_interval(key, self.key, self.chain[0][0]):
+                self.chords[i] = self.chain[0]
 
     def start(self):
         '''
