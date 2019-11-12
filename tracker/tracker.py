@@ -4,8 +4,8 @@ Implementacion fundamental del tracker. Este tracker utilizara el modelo REQUEST
 '''
 import zmq
 from setupdb import setup_client
+from time import sleep
 
-REP = 4
 
 class ClientInformationTracker:
     '''
@@ -21,19 +21,15 @@ class ClientInformationTracker:
             print("Error while setting up the database")
             exit(0)
 
-        alive = self.say_alive()
-
         # Llevar un record de los clientes que ya se han autentificado.
         # Si un cliente no pertenece a este conjunto, entonces un request
         # de informacion le sera negado
         self.registered_clients = set()
 
-        with zmq.Context() as context:
-            # Crea un servidor para Replicar a cada peticion de los clientes.
-            self.sock = context.socket(REP)
-            self.sock.bind(f'http://{address}:{port}')
-            # Atender a peticiones mientras el tracker este activo
-            self.serve_requests()
+        context = zmq.Context()
+        # Crea un servidor para Replicar a cada peticion de los clientes.
+        self.sock = context.socket(zmq.REP)
+        self.sock.bind(f'tcp://{address}:{port}')
 
     def __register_client(self, *client):
         raise NotImplementedError()
@@ -42,7 +38,15 @@ class ClientInformationTracker:
         raise NotImplementedError()
 
     async def say_alive(self):
-        raise NotImplementedError()
+        pass
 
     def serve_requests(self):
-        pass
+        '''
+        Atiende los pedidos de los clientes y responde con el servicio correspondiente.
+        '''
+        # Dummy code just to test for now
+        while 1:
+            print("waiting for received data")
+            data = self.sock.recv_string()
+            print(f'received data = {data}')
+            self.sock.send_string("Hi from server")
