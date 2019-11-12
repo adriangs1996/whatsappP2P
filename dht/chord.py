@@ -1,20 +1,19 @@
 '''
 CHORD Protocol Implementation for WhatsappP2P
 '''
-import socket
-import zmq
 import logging
 import re
 from hashlib import sha1
 from threading import Thread, BoundedSemaphore
 from time import sleep
+import zmq
 
 REQ = zmq.REQ
 REP = zmq.REP
 
 logging.basicConfig(format="%(asctime)s %(levelname)s:%(message)s", level=logging.DEBUG)
 
-URL_REGEX = re.compile(r'chord://(?P<host>[A-Za-z]+):(?P<port>[1-9][0-9]{3,4})')
+URL_REGEX = re.compile(r'chord://(?P<host>([A-Za-z0-9]|\.)+):(?P<port>[1-9][0-9]{3,4})')
 KEY_SIZE = 160
 MAX_KEY = 2**KEY_SIZE
 SLEEP_TIME = 5
@@ -109,7 +108,7 @@ class Node:
     def __init__(self, ip, port, dest_host=None):
         self.identifier = int(sha1(bytes("%s%d" % (ip, port), 'ascii')).hexdigest(), 16)
 
-        logging.debug("Creating node with id: %x" % self.identifier)
+        logging.debug("Creating node with id: 0x%x" % self.identifier)
 
         self.finger = [None] * KEY_SIZE
         self.storage = {}
@@ -154,17 +153,24 @@ class Node:
         Find a new succesor for Node with identifier "key" if possible.
         '''
         # if our succesor is responsible for key, return it
-        if key in range(self.identifier, self.succesor[Node.Id]):
+        if self.succesor and key in range(self.identifier, self.succesor[Node.Id]):
             logging.debug("[+] Succesor is responsable for key %x" % key)
             return self.succesor
 
         # otherwise, look for the closest preceding node of the key and ask for his succesor
         target = self.closest_preceding_node(key)
+
+        logging.info("Closest preceding node: {}".format(target))
+
+        if isinstance(target, KeySelf):
+            return target
+
         response = request(
             "chord://%s:%d" % (target[Node.Ip], target[Node.Port]),
             'find_succesor',
             key
         )
+
         if response:
             logging.debug("[+] Received node %s:%d from find_succesor request" % (
                 response[Node.Ip],
@@ -172,8 +178,6 @@ class Node:
             return response
 
         logging.error("Couldn't find node responsible for key %x " % key)
-
-        raise ValueError("Invalid Key")
 
     def closest_preceding_node(self, key):
         '''
@@ -184,7 +188,8 @@ class Node:
             if self.finger[i] and self.finger[i][Node.Id] in range(self.identifier + 1, key):
                 return self.finger[i]
 
-        return KeySelf([self.ip, self.port, self.identifier])
+        logging.debug("Closest preceding node is self: {}".format(self.node))
+        return self.node
 
     def join(self, url):
         '''
@@ -251,11 +256,14 @@ class Node:
                 'ping', self.identifier):
             self.predecesor = None
 
+        return None
+
     def notify(self, node):
         '''
         "node" thinks it might be our predecesor.
         '''
         if self.predecesor is None or node[Node.Id] in range(node[Node.Id] + 1, self.identifier):
+            logging.info('Set {} as predecesor'.format(node))
             self.predecesor = node
         return None
 
@@ -295,10 +303,17 @@ class Node:
         return 'alive'
 
     def __dispatch_rpc(self, action, key, val=None):
+
+        logging.info('Dispatching action: "%s"' % action)
         assert hasattr(self, action)
         func = getattr(self, action)
+
+        logging.info('Found corresponding procedure. val is {} in __dispatch_rpc'.format(val))
+
         if val is None:
-            return func(key)
+            result = func(key)
+            logging.info('Got result: {}'.format(result))
+            return result
         return func(key, val)
 
     def __serve_rpc(self):
@@ -313,43 +328,42 @@ class Node:
             logging.debug("Received request {}".format(req))
 
             val = None
+            action = req['action']
 
-            if req['action'] == 'notify':
+            if action == 'notify':
                 ip, port, identifier = req['ip'], req['port'], req['id']
                 key = KeyAddress([ip, port, identifier])
 
-            elif req['action'] == 'put':
+            elif action == 'put':
                 key, ip, port = req['key'], req['ip'], req['port']
                 val = ClientAddress([ip, port])
 
             else:
-                action, key = req['action'], req['key']
+                key = req['key']
 
-                if val is None:
-                    result = self.__dispatch_rpc(action, key)
+            result = self.__dispatch_rpc(action, key, val)
 
-                else:
-                    result = self.__dispatch_rpc(action.decode(), key, val)
+            logging.debug('Result is {}'.format(result))
 
-                if result is None:
-                    rpc_sock.send_json({'result':'None'})
+            if result is None:
+                rpc_sock.send_json({'result':'None'})
 
-                elif result == 'alive':
-                    rpc_sock.send_json({'result':'alive', 'key':self.identifier})
+            elif result == 'alive':
+                rpc_sock.send_json({'result':'alive', 'key':self.identifier})
 
-                elif isinstance(result, (KeyAddress, KeySelf)):
-                    rpc_sock.send_json({
-                        'result':'peer',
-                        'ip': result[Node.Ip],
-                        'port': result[Node.Port],
-                        'id': result[Node.Id]
-                    })
+            elif isinstance(result, (KeyAddress, KeySelf)):
+                rpc_sock.send_json({
+                    'result':'peer',
+                    'ip': result[Node.Ip],
+                    'port': result[Node.Port],
+                    'id': result[Node.Id]
+                })
 
-                elif isinstance(result, ClientAddress):
-                    rpc_sock.send_json({
-                        'result': 'address',
-                        'ip': result[Node.Ip],
-                        'port': result[Node.Port]
-                    })
+            elif isinstance(result, ClientAddress):
+                rpc_sock.send_json({
+                    'result': 'address',
+                    'ip': result[Node.Ip],
+                    'port': result[Node.Port]
+                })
 
             logging.debug('Closing connection')

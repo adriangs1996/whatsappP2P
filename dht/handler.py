@@ -3,7 +3,7 @@ import argparse
 import re
 
 def main():
-    url_regex = re.compile(r'(?P<host>[A-Za-z]+):(?P<port>[1-9][0-9]{3,4})')
+    url_regex = re.compile(r'(?P<host>([A-Za-z0-9]|\.)+):(?P<port>[1-9][0-9]{3,4})')
     argsparser = argparse.ArgumentParser()
     argsparser.add_argument('-i', help='ip address for this node')
     argsparser.add_argument('-p', type=int, help='port for this node')
