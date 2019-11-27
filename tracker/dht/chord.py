@@ -233,14 +233,12 @@ class Node:
         # if our succesor is responsible for key, return it
         succesor = self._get_live_succesor()
         if _in_interval(key, self.identifier, succesor[Node.Id]):
-            logging.debug("[+] Succesor is responsable for key %x", key)
+            logging.debug("[+] Succesor is responsable for key 0x%x", key)
             return succesor
 
         # otherwise, look for the closest preceding node of the key and ask
         # for his succesor
         target = self.closest_preceding_node(key)
-
-        logging.info("Closest preceding node: {}".format(target))
 
         if isinstance(target, KeySelf):
             return target
@@ -252,10 +250,6 @@ class Node:
         )
 
         if response:
-            logging.debug("[+] Received node %s:%d from find_succesor\
-                 request" % (
-                response[Node.Ip],
-                response[Node.Port]))
             return response
 
         logging.error("Couldn't find node responsible for key %x ", key)
@@ -273,7 +267,6 @@ class Node:
             ):
                 return self.finger[i]
 
-        logging.debug("Closest preceding node is self: {}".format(self.node))
         return self.node
 
     def join(self, url):
