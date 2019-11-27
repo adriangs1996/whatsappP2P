@@ -39,7 +39,7 @@ class ClientInformationTracker:
 
         server_thread.join()
 
-    def check_client(self, client_id):
+    def check_client(self, client_id, client_ip, client_port):
         if not isinstance(client_id, str) or not len(client_id) <= 20:
             return False
 
@@ -51,7 +51,16 @@ class ClientInformationTracker:
 
         response = request("chord://%s:%d" % chord_peer, 'get', client_key)
 
-        return response is not None
+        # If client is correctly checked, then update its address
+        if response is not None:
+            response = request(
+                'chord://%s:d' % chord_peer,
+                'put',
+                (client_ip, client_port, client_key)
+            )
+            return True
+
+        return False
 
     def register_client(self, client_id, client_ip, client_port):
         # This check is needed to ensure 160 bits key for sha1
