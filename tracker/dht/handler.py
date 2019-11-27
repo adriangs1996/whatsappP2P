@@ -2,6 +2,7 @@ import chord
 import argparse
 import re
 
+
 def main():
     url_regex = re.compile(r'(?P<host>([A-Za-z0-9]|\.)+):(?P<port>[1-9][0-9]{3,4})')
     argsparser = argparse.ArgumentParser()
@@ -15,10 +16,11 @@ def main():
         print("Suply ip and port for node")
         exit(0)
     if target_url is None:
-        node = chord.Node(ip, port)
+        chord.Node(ip, port)
     else:
         url_dict = url_regex.match(target_url).groupdict()
-        node = chord.Node(ip, port, (url_dict['host'], int(url_dict['port'])))
+        chord.Node(ip, port, (url_dict['host'], int(url_dict['port'])))
+
 
 if __name__ == '__main__':
     main()

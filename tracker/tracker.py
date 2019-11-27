@@ -1,5 +1,5 @@
 '''
-Main implementation of a address tracker for clients to known who they want
+Main implementation of an address tracker for clients to known who they want
 to talk to.
 '''
 from hashlib import sha1

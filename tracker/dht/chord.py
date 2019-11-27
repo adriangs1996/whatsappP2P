@@ -118,7 +118,7 @@ def request(url, action, key):
 
         # Response in case of succesfull ping
         if response['result'] == 'alive':
-            peer_key = response['id']
+            peer_key = response['key']
             return KeyAddress([host, port, peer_key])
 
         if response['result'] == 'None':
@@ -191,7 +191,7 @@ class Node:
             try:
 
                 request(
-                    "chord://%s%d" % (node[Node.Ip], node[Node.Port]),
+                    "chord://%s:%d" % (node[Node.Ip], node[Node.Port]),
                     "ping",
                     self.identifier
                 )
@@ -291,14 +291,15 @@ class Node:
             succesor_list.insert(0, identifier)
             self.succesor = succesor_list
 
-        try:
-            request(
-                "chord://%s:%d" % (identifier[Node.Ip], identifier[Node.Port]),
-                'notify',
-                self.node
-            )
-        except NoResponseException:
-            pass
+        if identifier:
+            try:
+                request(
+                    "chord://%s:%d" % (identifier[Node.Ip], identifier[Node.Port]),
+                    'notify',
+                    self.node
+                )
+            except NoResponseException:
+                pass
 
     def periodically_stabilize(self):
         '''
@@ -438,17 +439,17 @@ class Node:
             logging.debug('Result is {}'.format(result))
 
             if result is None:
-                rpc_sock.send_json({'result':'None'})
+                rpc_sock.send_json({'result': 'None'})
 
             elif isinstance(result, list):
                 rpc_sock.send_json({'result': result})
 
             elif result == 'alive':
-                rpc_sock.send_json({'result':'alive', 'key':self.identifier})
+                rpc_sock.send_json({'result': 'alive', 'key': self.identifier})
 
             elif isinstance(result, (KeyAddress, KeySelf)):
                 rpc_sock.send_json({
-                    'result':'peer',
+                    'result': 'peer',
                     'ip_address': result[Node.Ip],
                     'port': result[Node.Port],
                     'id': result[Node.Id]
