@@ -4,11 +4,16 @@ import re
 
 
 def main():
-    url_regex = re.compile(r'(?P<host>([A-Za-z0-9]|\.)+):(?P<port>[1-9][0-9]{3,4})')
+    url_regex = re.compile(
+        r'(?P<host>([A-Za-z0-9]|\.)+):(?P<port>[1-9][0-9]{3, 4})'
+        )
     argsparser = argparse.ArgumentParser()
     argsparser.add_argument('-i', help='ip address for this node')
     argsparser.add_argument('-p', type=int, help='port for this node')
-    argsparser.add_argument('-t', help='url of a known peer of a CHORD ring to join this node to')
+    argsparser.add_argument('-t',
+                            help='url of a known peer of a CHORD ring\
+                                 to join this node to'
+                            )
 
     args = argsparser.parse_args()
     ip, port, target_url = args.i, args.p, args.t

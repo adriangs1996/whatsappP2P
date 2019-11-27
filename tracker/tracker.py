@@ -9,20 +9,25 @@ import zmq
 from dht.chord import request, NoResponseException
 
 
-logging.basicConfig(format="%(asctime)s %(levelname)s: %(message)s", level=logging.DEBUG)
+logging.basicConfig(
+    format="%(asctime)s %(levelname)s: %(message)s",
+    level=logging.DEBUG
+    )
 
 
 class ClientInformationTracker:
     '''
-    Tracker minimo para servir informacion de los clientes, asi como para fungir como\
-    servidor de registro.
+    Tracker minimo para servir informacion de los clientes, asi como para\
+         fungir como servidor de registro.
     '''
 
     def __init__(self, address, port, bootstrap_chord_peers):
         '''
-        @param address: String with the dot notation of the ip for this tracker.
+        @param address: String with the dot notation of the ip for this\
+             tracker.
         @param port   : Int with the port to bind this tracker.
-        @bootstrap_chord_peers: List of ip-port tuples of well known chord nodes.
+        @bootstrap_chord_peers: List of ip-port tuples of well known chord\
+             nodes.
         '''
         self.chord_peers = bootstrap_chord_peers   # [(ip, port)]
         self.ip_address = address
@@ -46,16 +51,18 @@ class ClientInformationTracker:
 
         response = request("chord://%s:%d" % chord_peer, 'get', client_key)
 
-        return not response is None
+        return response is not None
 
     def register_client(self, client_id, client_ip, client_port):
-        #This check is needed to ensure 160 bits key for sha1
+        # This check is needed to ensure 160 bits key for sha1
         if not isinstance(client_id, str) or not len(client_id) <= 20:
             return False
 
         client_key = sha1(bytes("%s" % client_id, 'ascii'))
 
-        logging.debug("Verifiying if client %s is already register in DHT", client_id)
+        logging.debug(
+            "Verifiying if client %s is already register in DHT",
+            client_id)
 
         chord_peer = self.__find_alive_chord()
 
@@ -63,7 +70,9 @@ class ClientInformationTracker:
 
         if response is None:
 
-            logging.debug('Client %s is not registered, registering', client_id)
+            logging.debug(
+                'Client %s is not registered, registering',
+                client_id)
 
             response = request(
                 'chord://%s:d' % chord_peer,
