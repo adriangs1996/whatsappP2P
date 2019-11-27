@@ -156,7 +156,7 @@ class Node:
         self.lock = BoundedSemaphore()
         logging.debug("** Node %s:%d is online and ready **" % (self.ip_address, self.port))
 
-        if not dest_host is None:
+        if dest_host is not None:
             self.join("chord://%s:%d" % dest_host)
 
         # Start RPC server
