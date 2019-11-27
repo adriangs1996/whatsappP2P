@@ -11,12 +11,18 @@ import zmq
 REQ = zmq.REQ
 REP = zmq.REP
 
-logging.basicConfig(format="%(asctime)s %(levelname)s:%(message)s", level=logging.DEBUG)
+logging.basicConfig(
+        format="%(asctime)s %(levelname)s:%(message)s",
+        level=logging.DEBUG
+     )
 
-URL_REGEX = re.compile(r'chord://(?P<host>([A-Za-z0-9]|\.)+):(?P<port>[1-9][0-9]{3,4})')
+URL_REGEX = re.compile(
+    r'chord://(?P<host>([A-Za-z0-9]|\.)+):(?P<port>[1-9][0-9]{3,4})'
+    )
 KEY_SIZE = 160
 MAX_KEY = 2**KEY_SIZE
 SLEEP_TIME = 5
+
 
 class NoResponseException(Exception):
     '''
@@ -25,11 +31,13 @@ class NoResponseException(Exception):
     '''
     pass
 
+
 class KeyAddress(tuple):
     '''
     Represent the responding Node Address
     '''
     pass
+
 
 class KeySelf(KeyAddress):
     '''
@@ -37,14 +45,16 @@ class KeySelf(KeyAddress):
     '''
     pass
 
+
 class ClientAddress(tuple):
     '''
     Represents the address of a client to store in the DHT
     '''
     pass
 
+
 def _in_interval(node, node_left, node_right):
-    #handle normal case (a < b)
+    # handle normal case (a < b)
     if node_left < node_right:
         return node_left <= node <= node_right
 
@@ -61,6 +71,7 @@ def __connect_node(host, port):
 
     return sock
 
+
 def __parse_peer(data):
     return KeyAddress(
         [
@@ -69,6 +80,7 @@ def __parse_peer(data):
             data['id']
         ]
     )
+
 
 # RPC PROTOCOL
 def request(url, action, key):
@@ -82,10 +94,10 @@ def request(url, action, key):
 
     if isinstance(key, tuple):
         body = {
-            'action':action,
-            'ip_address':key[Node.Ip],
-            'port':key[Node.Port],
-            'id':key[Node.Id]
+            'action': action,
+            'ip_address': key[Node.Ip],
+            'port': key[Node.Port],
+            'id': key[Node.Id]
         }
     else:
         body = {'action': action, 'key': key}
@@ -98,7 +110,10 @@ def request(url, action, key):
         timeout = 1000
         while tries:
             # Wait for an incoming response
-            logging.info("Waiting for an incoming response: timeout set to %d secs", timeout//1000)
+            logging.info(
+                "Waiting for an incoming response: timeout set to %d secs",
+                timeout//1000
+                )
             if sock.poll(timeout=timeout, flags=zmq.POLLIN):
                 break
             tries -= 1
@@ -141,7 +156,10 @@ class Node:
     MaxSuccesorsList = 4
 
     def __init__(self, ip_address, port, dest_host=None):
-        self.identifier = int(sha1(bytes("%s%d" % (ip_address, port), 'ascii')).hexdigest(), 16)
+        self.identifier = int(sha1(bytes(
+            "%s%d" % (ip_address, port),
+            'ascii')
+        ).hexdigest(), 16)
 
         logging.debug("Creating node with id: 0x%x" % self.identifier)
 
@@ -154,7 +172,9 @@ class Node:
         self.predecesor = None
         self.next_finger = 1
         self.lock = BoundedSemaphore()
-        logging.debug("** Node %s:%d is online and ready **" % (self.ip_address, self.port))
+        logging.debug("** Node %s:%d is online and ready **" % (
+            self.ip_address, self.port
+            ))
 
         if dest_host is not None:
             self.join("chord://%s:%d" % dest_host)
@@ -216,7 +236,8 @@ class Node:
             logging.debug("[+] Succesor is responsable for key %x", key)
             return succesor
 
-        # otherwise, look for the closest preceding node of the key and ask for his succesor
+        # otherwise, look for the closest preceding node of the key and ask
+        # for his succesor
         target = self.closest_preceding_node(key)
 
         logging.info("Closest preceding node: {}".format(target))
@@ -231,7 +252,8 @@ class Node:
         )
 
         if response:
-            logging.debug("[+] Received node %s:%d from find_succesor request" % (
+            logging.debug("[+] Received node %s:%d from find_succesor\
+                 request" % (
                 response[Node.Ip],
                 response[Node.Port]))
             return response
@@ -244,7 +266,11 @@ class Node:
         self otherwise.
         '''
         for i in range(KEY_SIZE - 1, -1, -1):
-            if self.finger[i] and _in_interval(self.finger[i][Node.Id], self.identifier + 1, key):
+            if self.finger[i] and _in_interval(
+                    self.finger[i][Node.Id],
+                    self.identifier + 1,
+                    key
+            ):
                 return self.finger[i]
 
         logging.debug("Closest preceding node is self: {}".format(self.node))
@@ -278,7 +304,11 @@ class Node:
             "[+] Request predecessor from %s:%d" % (succesor[Node.Ip],
                                                     succesor[Node.Port]))
 
-        if identifier and _in_interval(identifier[Node.Id], self.identifier, succesor[Node.Id]):
+        if identifier and _in_interval(
+            identifier[Node.Id],
+            self.identifier,
+            succesor[Node.Id]
+              ):
             # Negotiate succesors list with new succesor
             succesor_list = request(
                 "chord://%s:%d" % (identifier[Node.Ip], identifier[Node.Port]),
@@ -294,7 +324,10 @@ class Node:
         if identifier:
             try:
                 request(
-                    "chord://%s:%d" % (identifier[Node.Ip], identifier[Node.Port]),
+                    "chord://%s:%d" % (
+                        identifier[Node.Ip],
+                        identifier[Node.Port]
+                        ),
                     'notify',
                     self.node
                 )
@@ -334,7 +367,10 @@ class Node:
         '''
         try:
             request(
-                "chord://%s:%d" % (self.predecesor[Node.Ip], self.succesor[Node.Port]),
+                "chord://%s:%d" % (
+                    self.predecesor[Node.Ip],
+                    self.succesor[Node.Port]
+                     ),
                 'ping', self.identifier
             )
         except(NoResponseException, AttributeError):
@@ -344,9 +380,11 @@ class Node:
         '''
         "node" thinks it might be our predecesor.
         '''
-        if self.predecesor is None\
-           or\
-        _in_interval(node[Node.Id], self.predecesor[Node.Id], self.identifier):
+        if self.predecesor is None or _in_interval(
+            node[Node.Id],
+            self.predecesor[Node.Id],
+            self.identifier
+        ):
 
             logging.info('Set {} as predecesor'.format(node))
             self.predecesor = node
@@ -370,7 +408,8 @@ class Node:
 
     def get(self, key):
         '''
-        Returns value associated with key if we are responsible for it and we have it.
+        Returns value associated with key if we are responsible for it and we
+        have it.
         '''
         result = self.storage.get(key, default=None)
         return result
@@ -383,7 +422,8 @@ class Node:
 
     def put(self, key, val):
         '''
-        Updates/Defines a value associated with a key on this node and all his succesors.
+        Updates/Defines a value associated with a key on this node and all his
+        succesors.
         '''
         self.storage[key] = val
         for node in self.succesor:
@@ -424,11 +464,17 @@ class Node:
             action = req['action']
 
             if action == 'notify':
-                ip_address, port, identifier = req['ip_address'], req['port'], req['id']
+                ip_address, port, identifier =\
+                    req['ip_address'],\
+                    req['port'],\
+                    req['id']
                 key = KeyAddress([ip_address, port, identifier])
 
             elif action == 'put':
-                key, ip_address, port = req['id'], req['ip_address'], req['port']
+                key, ip_address, port =\
+                    req['id'],\
+                    req['ip_address'],\
+                    req['port']
                 val = ClientAddress([ip_address, port])
 
             else:
