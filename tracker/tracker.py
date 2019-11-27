@@ -15,6 +15,59 @@ logging.basicConfig(
     )
 
 
+def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
+    '''
+    Tracker request can only contain 3 actions: check_client, register_client\
+         or locate.
+    @param tracker_ip   : Know tracker ip to ask to
+    @param tracker_port : The tracker port where service is active
+    @param action       : Desire action to execute on the tracker
+    @kwargs             : Keyword args with the following keys:
+    user := username to trackto (either to check or register or locate)
+    ip   := ip of the sender (only needed for check or register)
+    port := port of the sender service (only needed for check or register)
+    '''
+    # Create the client socket
+    client_context = zmq.Context()
+    client_sock = client_context.socket(zmq.REQ)
+    assert(action in ('locate', 'check_client', 'register_client'))
+    client_sock.connect("tcp://%s:%d" % (tracker_ip, tracker_port))
+    if action in ('check_client', 'register_client'):
+        client_sock.send_json(
+            {'action': action,
+             'id': kwargs['user'],
+             'ip': kwargs['ip'],
+             'port': kwargs['port']
+             }
+            )
+    # The other posibility is only 'locate'
+    else:
+        client_sock.send_json(
+            {
+                'action': action,
+                'id': kwargs['user']
+            }
+            )
+    # Check if server is responding
+    # clients should test for a server response to know whether
+    # it's active, or is down.
+    tries = 8
+    timeout = 1000
+    while tries:
+        if client_sock.poll(timeout=timeout, flags=zmq.POLLIN):
+            break
+        tries -= 1
+        timeout *= 2
+    # No server response
+    if not tries:
+        client_sock.close()
+        raise NoResponseException
+
+    response = client_sock.recv_json()['response']
+    client_sock.close()
+    return response
+
+
 class ClientInformationTracker:
     '''
     Tracker minimo para servir informacion de los clientes, asi como para\
