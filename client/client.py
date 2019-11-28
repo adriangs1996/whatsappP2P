@@ -1,4 +1,8 @@
-
+import zmq
+import pickle
+import json
+from myqueue import Queue as myQueue
+from threading import Thread
 
 class Client:
     '''
@@ -15,19 +19,70 @@ class Client:
     se puede cargar un cliente ya guardado utilizando la funcionalidad estatica *restore_client()*.
     '''
 
-    def __init__(self, *args, **kwargs):
-        raise NotImplementedError()
+    def __init__(self, *args, **kwargs):  
+        # .*args = server_addr, self.ip, self.port si se esta instanciando un cliente nuevo, 
+        # #si no *args = client_identifier para restaurarlo'
+        if len(args) <= 2:
+            Client.restore_client(args[1])
+        else:
+            self.server = args[1]       # tracker addresss
+            self.ip = args[2]           
+            self.port = args[3]
+            self.contacts = {}          # {contact_name : address}
+            self.chats = {}             # {contact_name : list with the messages in the conversation}
+            self.outgoing_queue = {}    # {contact_name : queue with pending messages}
+            self.registered = False
+
+        with zmq.Context() as context:
+            self.server_sock = context.socket(zmq.REQ)
+            self.server_sock.connect(f'http://{self.server_addr}')
+            
+    
+        #! here all things refering to registration and login
+    
+
+        self.__start_client__(ip, port)
+
+        self.process_pending_messages()
+        
+        self.__handle_incomming__()   
+
+
+    def __start_client__(self, ip, port):
+        #this is to start the client sockets
+        with zmq.Context() as context:
+            self.incoming_sock = context.socket(zmq.REP)
+            self.incoming_sock.bind(f'tcp://{self.ip}:{self.port}')
+            self.outgoing_sock = context.socket(zmq.REQ)
+
+    def __handle_incomming__(self):
+        while from_server = self.server_sock.recv():
+
 
     def register(self, username, password, phone):
+    
         '''
         Este procedimiento se reserva para la creacion de clientes que no esten presentes en el\
         servidor. Permite interactuar con el servidor para registrar un nuevo cliente \
         proporcionando un nombre de usuario, contrasena, y un telefono, y el servidor devolvera\
         un id con el que se identifica ese cliente a partir de ese momento.
         '''
-        raise NotImplementedError()
+        self.username = username
+        self.passsword = hash(password)
+        self.phone = phone
+        self.server_sock.send_json(
+            {   'action': 'register',
+                'id': self.identifier,
+                'ip': self.ip,
+                'port': self.port,
+                'password': self.passsword,
+                'phone': self.phone
+            }
+            )
+        reply = server_sock.recv()
+        self.identifier = (int)reply
 
-    def loggin(self):
+    def loggin(self):"Ok"
         '''
         Una vez registrado el cliente, con cada inicio de sesion habra que logearse en el sistema.\
         Para ello se utiliza el identificador del cliente y se le proporciona el usuario y el passw\
@@ -36,17 +91,56 @@ class Client:
         '''
         raise NotImplementedError()
 
-    def send_message_client(self, target_client, message):
+    def send_message_client(self, target_client, message) -> bool:
         '''
         Envia un mensaje al cliente destino.
         '''
-        raise NotImplementedError()
+        address = self.contacts[target_client]
+        if not self.__send_message__(address, message):
+            self.enqueue_message(target_client, message)
+        else:
+            if target_client not in self.chats.keys():
+                self.chats[target_client] = myQueue()
+            self.chats[target_client].smart_enqueue(message)
+
+    def __send_message__(self, target_address, message) -> bool:
+        reply = None
+        try:
+            ready = self.outgoing_sock.get_monitor_socket(addr= target_address)
+            if not ready:
+                self.outgoing_sock.connect(target_address)
+            self.outgoing_sock.send_pyobj(message)
+            reply = self.outgoing_sock.recv_string() 
+            if not reply:
+                return False
+            return True          
+        except:
+            return False
+
+    def process_pending_messages(self):
+        for contact in outgoing_queue.keys():
+            address = self.contacts[contact]
+            queue = outgoing_queue[contact]
+            while not queue.isEmpty():
+                message = queue.peek()
+                if not self.__send_message__(address, message):
+                    if not self.__send_message__(self.server, message):
+                        break
+                else:
+                    self.outgoing_queue[contact].pop()
+                    
+                
 
     def send_message_group(self, target_group, message):
         '''
         Envia un mensaje al grupo destino.
         '''
         raise NotImplementedError()
+
+    def enqueue_message(self, target_client, message):
+        if target_client not in self.outgoing_queue.keys():
+            self.outgoing_queue[target_client] = myQueue(auto_growth= True)
+        self.outgoing_queue[target_client].enqueue(message)        
 
     def send_adj_client(self, target_client, target_file):
         '''
@@ -83,14 +177,22 @@ class Client:
         Salva el estado del cliente, de modo que cada inicio de la app no requiera de todo un nuevo\
         proceso de registro y nueva generacion de las llaves, asi como de las sesiones.
         '''
-        raise NotImplementedError()
+        d={}
+        for key in self.__dict__.keys():
+            if type(self.__dict__[key]) is not zmq.Socket:
+                
+                d[key] = self.__dict__[key]
+        json.dump(d, open(f'wsp_client_{self.identifier}', mode ='w'))
 
     @staticmethod
     def restore_client(identifier):
         '''
         Carga el estado de un cliente guardado y devuelve una instancia de Client listo para usar.
         '''
-        raise NotImplementedError()
+        client_info = json.load(f'wsp_client_{self.identifier}'))
+
+        for key in client_info:
+            self.__dict__[key] = client_info[key]
 
     async def discover_online_contacts(self):
         '''
