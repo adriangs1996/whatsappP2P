@@ -80,11 +80,10 @@ class Client:
             try:
                 reply = request_tracker_action(t_ip, t_port, 'register_client', user= username, ip= self.ip, port= self.port)
                 print('sent request from client')
-                print(reply)
                 if reply:
                     self.registered = True
                     self.username = username
-                    break     
+                    break            
             except:
                 continue
 
@@ -555,7 +554,7 @@ def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
         client_sock.close()
         raise NoResponseException()
 
-    response = client_sock.recv_pyobj()['response']
+    response = client_sock.recv_pyobj()
     if isinstance(response, list):
         rep = []
         for message in response:
@@ -564,6 +563,7 @@ def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
 
     client_sock.close()
     return response
-    
+
+
 class NoResponseException(Exception):
     pass
