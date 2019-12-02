@@ -26,7 +26,7 @@ class Client:
             #self.online_contacts = {}
             self.registered = False
             self.active_user = None
-            self.incomming_queue = myQueue(auto_growth= True)
+            self.incomming_queue = myQueue(capacity=50, auto_growth= True, items=[])
 
         #self.server_sock = self.__open_socket__()
         #self.is_sock_open = True
@@ -45,7 +45,7 @@ class Client:
         self.process_pending_messages()
         
         self.incomming_thread = Thread(target= self.__handle_incomming__)
-        #self.incomming_thread.setDaemon(True)
+        self.incomming_thread.setDaemon(True)
         self.incomming_thread.start()
 
     def __start_client__(self):
@@ -87,6 +87,7 @@ class Client:
                 continue
             else:
                 print(messg)
+                print(self.active_user)
                 if not isinstance(messg, Message):
                     if messg == 'ping':
                         self.incoming_sock.send_string('online')
@@ -94,6 +95,7 @@ class Client:
                     sender = messg.sender
                     if sender == self.active_user:
                         self.incomming_queue.enqueue(messg)
+                        print('message enqueued')
                     else:
                         self.__log_message__(sender, messg)                
                     self.incoming_sock.send_json({'response': True})
@@ -242,6 +244,8 @@ class Client:
     def add_contact(self, contact_name):                    #// done
         self.contacts_info[contact_name] = {}
         self.update_contact_info(contact_name)
+        temp = myQueue(capacity=50, auto_growth=False, items=[])
+        self.contacts_info[contact_name]['conversation'] = temp
         return self.contacts_info[contact_name]
 
     def update_contact_info(self, contact_name):            #// done
@@ -262,7 +266,8 @@ class Client:
     def enqueue_message(self, target_client, message):   
         temp_queue = self.outgoing_queue   #//auxiliary method, done
         if target_client not in temp_queue.keys():
-            temp_queue[target_client] = myQueue(auto_growth= True)
+            temp = myQueue(capacity= 50, auto_growth= True, items= [])
+            temp_queue[target_client] = temp
         temp_queue[target_client].enqueue(message)        
 
 
@@ -271,11 +276,13 @@ class Client:
         try:    #//auxiliary method, done
             queue_temp = self.contacts_info[target_client]['conversation']
         except KeyError:
-            print('key error')
+            print('key error logging message')
             self.add_contact(target_client)
         if queue_temp == None:
-            queue_temp = myQueue()
+            queue_temp = myQueue(capacity=50, auto_growth=False, items=[])
+            self.contacts_info[target_client]['conversation'] = queue_temp
         queue_temp.smart_enqueue(message)
+        print('message logged')
 
     def send_adj_client(self, target_client, target_file):  #todo
         '''

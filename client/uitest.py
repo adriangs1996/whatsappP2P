@@ -8,6 +8,7 @@
 from regpopup import Ui_Dialog
 from client import Client, Message
 from PyQt5 import QtCore, QtGui, QtWidgets
+from threading import Thread
 
 class Ui_MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
@@ -16,6 +17,10 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
         self.dialog = Ui_Dialog(self.client)
         self.check_regitration()
         self.setupUi()
+
+        incomm_thread = Thread(target= self.handle_incomming_messages, name= 'handle_incomming_messages in uitest')
+        incomm_thread.setDaemon(True)
+        incomm_thread.start()
 
     def closeEvent(self, event):
         self.client.save_client_state()
@@ -114,6 +119,7 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
         self.pushButton_search_contact.clicked.connect(self.button_search_contact_clicked)
         self.pushButton_send.clicked.connect(self.button_send_clicked)
         self.pushButton_register.clicked.connect(self.check_regitration)
+        self.listWidget_contacts.clicked.connect(self.contact_list_item_selected)
 
     def retranslateUi(self, MainWindow):
         _translate = QtCore.QCoreApplication.translate
@@ -161,30 +167,42 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
             
     def contact_list_item_selected(self):
         item = self.listWidget_contacts.currentItem()
-        if item.contact_name != self.client.active_user:
-            self.client.active_user = item.contact_name
-            self.label_2.setText(item.contact_name)
-            self.show_conversation(item.contact_data['conversation'])
+        print(item)
+        self.client.active_user = item.contact_name
+        self.label_2.setText(item.contact_name)
+        print(item.contact_data['conversation'])
+        self.show_conversation(item.contact_data['conversation'])
+ 
 
 
     def button_send_clicked(self):
         text = self.textEdit.toPlainText()
         target = self.listWidget_contacts.currentItem()
+        if not target:
+            target = self.listWidget_2.currentItem()
+            if not target:
+                return                
         if self.client.send_message_client(target.contact_name, text):
-            item = CustomListItem(target.contact_name, text)
+            item = CustomListItem(self.client.username, text)
             item.setText(f'{item.contact_name}\n {item.contact_data}')
             self.conversList.addItem(item)
             item.setTextAlignment(0x002)
-            if target.contact_data['conversation'].count < self.conversList.count():
+            messg_list = target.contact_data['conversation']             
+            if messg_list.count < self.conversList.count():
                 self.conversList.takeItem(0)
         
         
     def check_regitration(self):
         if not self.client.registered:
             self.dialog.show()
+        else:
+            self.setWindowTitle("WhatsAppP2P--{0}".format(self.client.username))
+        
         
     def show_conversation(self, messg_list):
         self.conversList.clear()
+        if messg_list == None:
+            return
         for mesg in messg_list:
             item = CustomListItem(mesg.sender, mesg.text)
             item.setText(f'{item.contact_name}\n {item.contact_data}')
@@ -196,17 +214,29 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
 
     def handle_incomming_messages(self):
         queue = self.client.incomming_queue
+        print(queue)
         while True:
-            message = self.client.incomming_queue.pop()
-            current_sender = self.listWidget_contacts.currentItem()
+            active_contact = self.listWidget_contacts.currentItem()
             while not queue.isEmpty:
-                if current_sender == message.sender:
-                    item = CustomListItem(message.sender, message.text)
+                print('queue not empty')
+                message = self.client.incomming_queue.pop() 
+                sender = message.sender
+                if active_contact == sender:
+                    print('active contact is sender')
+                    item = CustomListItem(sender, message.text)
                     item.setText(f'{item.contact_name}\n {item.contact_data}')
                     self.conversList.addItem(item)
-                    item.setTextAlignment(0x001)                
+                    item.setTextAlignment(0x001)   
                 else:
-                    self.client.__log_message__(message.sender, message)
+                    print('sender is not active contact')
+                    self.client.__log_message__(sender, message)
+                    if not self.listWidget_contacts.findItems(sender, QtCore.Qt.MatchFixedString):
+                        contact_to_add = CustomListItem(sender, self.client.contacts_info[sender])
+                        contact_to_add.setText(sender)
+                        self.listWidget_contacts.addItem(contact_to_add)
+                    
+                    
+
 
 class CustomConversation(QtWidgets.QWidget):
     def __init__(self):
@@ -231,3 +261,9 @@ class CustomListItem(QtWidgets.QListWidgetItem):
 
     def item_info_specific(self, wanted: str):
         return self.contact_data[wanted]
+
+    def __str__(self):
+        return str({'name': self.contact_name, 'data': self.contact_data})
+
+    def __repr__(self):
+        return self.__str__()

@@ -15,7 +15,7 @@ class Queue:
         self.__head = 0                                                     # start index of the queue: the head (first element added)
         self.__tail = self.__count % self.__capacity                        # end index of the queue: the tail (latest element added)
         
-        self.__elements = items                                             # list of elements (len = capacity)
+        self.__elements = items.copy()                                      # list of elements (len = capacity)
         self.__elements.extend([None] * (self.__capacity - self.__count))
             
 
@@ -66,6 +66,9 @@ class Queue:
             raise IndexError
 
         return self.__elements[(self.__head + index) % self.__capacity]
+
+    def __iter__(self):
+        return self.items.__iter__()
 
     def __len__(self):
         return self.__count
