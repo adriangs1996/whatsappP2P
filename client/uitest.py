@@ -177,17 +177,15 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
 
     def button_send_clicked(self):
         text = self.textEdit.toPlainText()
-        target = self.listWidget_contacts.currentItem()
-        if not target:
-            target = self.listWidget_2.currentItem()
-            if not target:
+        contact_name = self.listWidget_contacts.currentItem().contact_name
+        if not contact_name:
+            contact_name = self.listWidget2_contacts.currentItem().contact_name
+            if not contact_name:
                 return                
-        if self.client.send_message_client(target.contact_name, text):
-            item = CustomListItem(self.client.username, text)
-            item.setText(f'{item.contact_name}\n {item.contact_data}')
-            self.conversList.addItem(item)
-            item.setTextAlignment(0x002)
-            messg_list = target.contact_data['conversation']             
+        target = self.client.contacts_info[contact_name]
+        if self.client.send_message_client(contact_name, text):
+            self.paint_message(self.client.username, text, 2)
+            messg_list = target['conversation']             
             if messg_list.count < self.conversList.count():
                 self.conversList.takeItem(0)
         
@@ -204,37 +202,36 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
         if messg_list == None:
             return
         for mesg in messg_list:
-            item = CustomListItem(mesg.sender, mesg.text)
-            item.setText(f'{item.contact_name}\n {item.contact_data}')
-            self.conversList.addItem(item) 
-            if not mesg.sender == self.client.username:
-                item.setTextAlignment(0x001)
-            else:
-                item.setTextAlignment(0x002)
+            self.paint_message(mesg.sender, mesg.text, 0x001 + (mesg.sender == self.client.username))
 
     def handle_incomming_messages(self):
         queue = self.client.incomming_queue
         print(queue)
         while True:
-            active_contact = self.listWidget_contacts.currentItem()
+            active_contact = None
+            if self.listWidget_contacts.currentItem():
+                active_contact = self.listWidget_contacts.currentItem().contact_name
             while not queue.isEmpty:
                 print('queue not empty')
-                message = self.client.incomming_queue.pop() 
+                message = queue.pop() 
                 sender = message.sender
+                self.client.__log_message__(sender, message)
+                print('sender: {0}\nactive contact: {1}'.format(sender, active_contact))
                 if active_contact == sender:
                     print('active contact is sender')
-                    item = CustomListItem(sender, message.text)
-                    item.setText(f'{item.contact_name}\n {item.contact_data}')
-                    self.conversList.addItem(item)
-                    item.setTextAlignment(0x001)   
+                    self.paint_message(sender, message.text, 0x001)  
                 else:
                     print('sender is not active contact')
-                    self.client.__log_message__(sender, message)
-                    if not self.listWidget_contacts.findItems(sender, QtCore.Qt.MatchFixedString):
-                        contact_to_add = CustomListItem(sender, self.client.contacts_info[sender])
-                        contact_to_add.setText(sender)
-                        self.listWidget_contacts.addItem(contact_to_add)
-                    
+                    # self.client.__log_message__(sender, message)
+            
+            
+    def paint_message(self, sender, message_text, alignment):
+        item = CustomListItem(sender, message_text)
+        item.setText(f'{item.contact_name}\n {item.contact_data}')
+        self.conversList.addItem(item)
+        item.setTextAlignment(alignment)
+        self.conversList.repaint() 
+
                     
 
 

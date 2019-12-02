@@ -76,6 +76,7 @@ class Ui_Dialog(QtWidgets.QDialog):
         else:
             if reply:
                 self.Accepted = True
+                # self.parent.setWindowTitle("WhatsAppP2P--{0}".format(self.client.username))
                 self.accept()
             else:
                 self.Accepted = False

@@ -20,7 +20,7 @@ class Client:
         except:
             self.ip = socket.gethostbyname(socket.gethostname())           
             self.port = randint(3001, 9000)
-            self.contacts_info = {}          # {contact_name : {'addr': address (*tuple ip,port*), 'online' : bool,  'conversation': myQueue(messages)}}
+            self.contacts_info = {}          # {contact_name : {'addr': address (*tuple ip,port*), 'online' : bool, 'unread': int, 'conversation': myQueue(messages)}}
             #self.chats = {}             # {contact_name : list with the messages in the conversation}
             self.outgoing_queue = {}    # {contact_name : queue with pending messages}
             #self.online_contacts = {}
@@ -244,6 +244,7 @@ class Client:
     def add_contact(self, contact_name):                    #// done
         self.contacts_info[contact_name] = {}
         self.update_contact_info(contact_name)
+        self.contacts_info['unread'] = 0
         temp = myQueue(capacity=50, auto_growth=False, items=[])
         self.contacts_info[contact_name]['conversation'] = temp
         return self.contacts_info[contact_name]
@@ -282,6 +283,7 @@ class Client:
             queue_temp = myQueue(capacity=50, auto_growth=False, items=[])
             self.contacts_info[target_client]['conversation'] = queue_temp
         queue_temp.smart_enqueue(message)
+        self.contacts_info['unread'] += 1
         print('message logged')
 
     def send_adj_client(self, target_client, target_file):  #todo
@@ -508,6 +510,9 @@ class Message:
         Devuelve el cliente al que se le envió el mensaje
         '''
         return self.__receiver
+
+    def __str__(self):
+        return str({'from': self.__sender, 'to': self.__receiver, 'text': self.__text})
 
     # @property
     # def timestamp(self):
