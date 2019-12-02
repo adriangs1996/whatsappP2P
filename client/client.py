@@ -1,6 +1,4 @@
 import zmq
-import pickle
-import json
 import cloudpickle
 from myqueue import Queue as myQueue
 from threading import Thread
@@ -23,9 +21,12 @@ class Client:
     def __init__(self, *args, **kwargs):  
         # .*args = server_addr, self.ip, self.port si se esta instanciando un cliente nuevo, 
         # #si no *args = client_identifier para restaurarlo'
-        if len(args) <= 2:
+        # if len(args) <= 2:
+        #     Client.restore_client(args[1])
+        # else:
+        try:
             Client.restore_client(args[1])
-        else:
+        except:
             self.servers = []      # trackers addresses, tuple (ip,port)
             self.ip = args[1]           
             self.port = args[2]
@@ -53,7 +54,7 @@ class Client:
 
     def __start_client__(self, ip, port):
         #this is to start the client sockets
-        context = zmq.Context()             #! this might be troublesome, in case of error check if this is the cause, try solve it with global context
+        context = zmq.Context()             #! this might be troublesome, in case of error check if this is the cause, try to solve it with global context
         self.incoming_sock = context.socket(zmq.REP)
         self.incoming_sock.bind(f'tcp://{self.ip}:{self.port}')
         self.outgoing_sock = context.socket(zmq.REQ)
@@ -314,6 +315,19 @@ class Client:
         # Un posible valor de hash para los clientes puede ser una combinacion de
         # su llave publica con su llave privada
         raise NotImplementedError()
+
+    def search_contact(self, contact_name):
+        for t_ip,t_port in self.servers:
+            try:
+                reply = request_tracker_action(t_ip, t_port, 'locate', user= contact_name)
+            except:
+                return None
+            else:
+                return reply
+
+    def delete_contact(self. contact_name):
+        self.contacts_info.pop(contact_name)
+        
 
 
 class Group:
