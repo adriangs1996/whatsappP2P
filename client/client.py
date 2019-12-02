@@ -9,7 +9,7 @@ loads = cloudpickle.loads
 
 class Client:  
 
-    def __init__(self, *args, **kwargs):   #todo implement get server addrs from config file #// done
+    def __init__(self, *args, **kwargs):   
         # .*args = server_addr, self.ip, self.port si se esta instanciando un cliente nuevo, 
         # #si no *args = client_identifier para restaurarlo'
         # if len(args) <= 2:
@@ -45,7 +45,7 @@ class Client:
         self.process_pending_messages()
         
         self.incomming_thread = Thread(target= self.__handle_incomming__)
-        self.incomming_thread.setDaemon(True)
+        #self.incomming_thread.setDaemon(True)
         self.incomming_thread.start()
 
     def __start_client__(self):
@@ -58,40 +58,45 @@ class Client:
 
     def __handle_incomming__(self):
         while True:
-            if self.incoming_sock.closed:
-                self.incoming_sock = self.context.socket(zmq.REP)
-                self.incoming_sock.bind(f'tcp://{self.ip}:{self.port}')
-            tries = 8
-            timeout = 10
-            while tries:
-                if self.incoming_sock.poll(timeout=timeout, flags=zmq.POLLIN):
-                    print('connection in handle incomming')
-                    break
-                print('no connection in handle incomming')
-                self.incoming_sock.setsockopt(zmq.LINGER, 0)
-                self.incoming_sock.close()
-                self.incoming_sock = self.context.socket(zmq.REP)
-                self.incoming_sock.bind(f'tcp://{self.ip}:{self.port}')
-                # client_sock.send_json(json_to_send)
-                tries -= 1
-                timeout *= 2
-            # No server response
-            if not tries:
-                # client_sock.close()
-                print('not tries in handle incomming')
+            # if self.incoming_sock.closed:
+            #     self.incoming_sock = self.context.socket(zmq.REP)
+            #     self.incoming_sock.bind(f'tcp://{self.ip}:{self.port}')
+            # tries = 8
+            # timeout = 10
+            # while tries:
+            #     if self.incoming_sock.poll(timeout=timeout, flags=zmq.POLLIN):
+            #         print('connection in handle incomming')
+            #         break
+            #     print('no connection in handle incomming')
+            #     self.incoming_sock.setsockopt(zmq.LINGER, 0)
+            #     self.incoming_sock.close()
+            #     self.incoming_sock = self.context.socket(zmq.REP)
+            #     self.incoming_sock.bind(f'tcp://{self.ip}:{self.port}')
+            #     # client_sock.send_json(json_to_send)
+            #     tries -= 1
+            #     timeout *= 2
+            # # No server response
+            # if not tries:
+            #     # client_sock.close()
+            #     print('not tries in handle incomming')
+            #     continue
+            try:
+                messg = self.incoming_sock.recv_pyobj()
+            except Exception as error:
+                print(error)
                 continue
-            
-            messg = self.incoming_sock.recv_pyobj()
-            if not isinstance(messg, Message):
-                if messg == 'ping':
-                    self.incoming_sock.send_string('online')
             else:
-                sender = messg.sender
-                if sender == self.active_user:
-                    self.incomming_queue.enqueue(messg)
+                print(messg)
+                if not isinstance(messg, Message):
+                    if messg == 'ping':
+                        self.incoming_sock.send_string('online')
                 else:
-                    self.__log_message__(sender, messg)                
-                self.incoming_sock.send_json({'response': True})
+                    sender = messg.sender
+                    if sender == self.active_user:
+                        self.incomming_queue.enqueue(messg)
+                    else:
+                        self.__log_message__(sender, messg)                
+                    self.incoming_sock.send_json({'response': True})
 
 
     def register(self, username) -> bool:          #// done
@@ -132,8 +137,11 @@ class Client:
         '''
         for t_ip,t_port in self.servers:
             print('entered cycle')
-            reply = request_tracker_action2(t_ip, t_port, 'check_client', user= self.username, ip= self.ip, port= self.port)
-            print('return')
+            try:
+                reply = request_tracker_action2(t_ip, t_port, 'check_client', user= self.username, ip= self.ip, port= self.port)
+            except NoResponseException:
+                print('no response from server')
+                continue
             if reply == None:
                 print('no response in login')
                 continue
@@ -147,10 +155,11 @@ class Client:
             
 
 
-    def send_message_client(self, target_client, message):          #//done, i think
+    def send_message_client(self, target_client: str, message_text: str):          #//done, i think
         '''
         Envia un mensaje al cliente destino.
         '''
+        message = Message(message_text, self.username, target_client)
         if target_client not in self.contacts_info.keys():
             self.add_contact(target_client)
         address = self.get_peer_address(target_client)
@@ -171,11 +180,12 @@ class Client:
             return False
         
         self.outgoing_sock.send_pyobj(message)
+        print('message sent')
 
         tries = 10
         tout = 1000
         while tries:
-            if self.outgoing_sock.poll(timeout= tout):
+            if self.outgoing_sock.poll(timeout= tout, flags= zmq.POLLIN):
                 break
             tries -= 1
             tout *= 2
@@ -184,6 +194,7 @@ class Client:
             return False
 
         reply = self.outgoing_sock.recv_json()
+        print(reply['response'])
         return reply['response']
        
     def process_pending_messages(self):                     #// done
@@ -248,14 +259,20 @@ class Client:
         r_ip,r_port = self.contacts_info[peer_name]['addr']
         return f'{r_ip}:{r_port}'
 
-    def enqueue_message(self, target_client, message):      #//auxiliary method, done
-        if target_client not in self.outgoing_queue.keys():
-            self.outgoing_queue[target_client] = myQueue(auto_growth= True)
-        self.outgoing_queue[target_client].enqueue(message)        
+    def enqueue_message(self, target_client, message):   
+        temp_queue = self.outgoing_queue   #//auxiliary method, done
+        if target_client not in temp_queue.keys():
+            temp_queue[target_client] = myQueue(auto_growth= True)
+        temp_queue[target_client].enqueue(message)        
 
 
-    def __log_message__(self, target_client, message):      #//auxiliary method, done
-        queue_temp = self.contacts_info[target_client]['conversation']
+    def __log_message__(self, target_client, message):  
+        queue_temp = None
+        try:    #//auxiliary method, done
+            queue_temp = self.contacts_info[target_client]['conversation']
+        except KeyError:
+            print('key error')
+            self.add_contact(target_client)
         if queue_temp == None:
             queue_temp = myQueue()
         queue_temp.smart_enqueue(message)
@@ -333,7 +350,10 @@ class Client:
         y que actualice los datos del cliente cada vez que obtenga resultados.
         '''        
         for contact in self.contacts_info.keys():
+            online = self.check_online(contact)
             self.contacts_info[contact]['online'] = self.check_online(contact)
+            # if not online:
+            #     self.update_contact_info(contact)
 
     def check_online(self, contact_name):                   #// auxiliary method, done
         c_ip,c_port = self.contacts_info[contact_name]['addr']
@@ -350,6 +370,7 @@ class Client:
             time *= 2
         if not tries:
             socket.close()
+            #self.update_contact_info(contact_name)            
             return False
         reply = socket.recv_string()
         socket.close()
@@ -369,9 +390,10 @@ class Client:
                 print(reply)
             except NoResponseException:
                 print('entered exception')
-                return None
-            
-            return reply
+                continue  
+            else:
+                print(f'search result: {reply}')
+                return reply
 
     def delete_contact(self, contact_name):
         self.contacts_info.pop(contact_name)
@@ -380,7 +402,8 @@ class Client:
         self.save_client_state()
         self.incomming_thread.join()
         self.incoming_sock.close()
-        self.outgoing_sock.close()        
+        self.outgoing_sock.close() 
+        self.context.term()       
 
     def __read_config__(self):
         fd = open('config-file.conf', 'r')
@@ -448,11 +471,11 @@ class Message:
     Oferece informacion sobre el cliente que lo envia, su contenido y\
     una marca temporal que indica el momento en que se envio.
     '''
-    def __init__(self, text, sender, timestamp):
-        self.sender = sender    # username : string
-        self.receiver           # reciever username : string
-        self.text = text
-        self.timestamp = timestamp
+    def __init__(self, text, sender, receiver):
+        self.__sender = sender    # username : string
+        self.__receiver = receiver          # reciever username : string
+        self.__text = text
+        # self.__timestamp
 
     # Permitir que los mensajes puedan ser almacenados como llaves de diccionarios
     def __hash__(self):
@@ -463,28 +486,28 @@ class Message:
         '''
         Devuelve el texto del mensaje
         '''
-        return self.text
+        return self.__text
 
     @property
     def sender(self):
         '''
         Devuelve el cliente que creo el mensaje
         '''
-        return self.sender
+        return self.__sender
 
     @property
     def receiver(self):
         '''
         Devuelve el cliente al que se le envió el mensaje
         '''
-        return self.receiver
+        return self.__receiver
 
-    @property
-    def timestamp(self):
-        '''
-        Devuelve la fecha en la que se envio el mensaje
-        '''
-        return self.timestamp
+    # @property
+    # def timestamp(self):
+    #     '''
+    #     Devuelve la fecha en la que se envio el mensaje
+    #     '''
+    #     return self.__timestamp
 
 def get_json_from_action(action, **kwargs):
     json_res = None
@@ -541,7 +564,7 @@ def request_tracker_action2(tracker_ip, tracker_port, action, **kwargs):
     # clients should test for a server response to know whether
     # it's active, or is down.
     tries = 8
-    timeout = 10
+    timeout = 100
     while tries:
         if client_sock.poll(timeout=timeout, flags=zmq.POLLIN):
             print('connection')
@@ -558,10 +581,12 @@ def request_tracker_action2(tracker_ip, tracker_port, action, **kwargs):
     # No server response
     if not tries:
         # client_sock.close()
-        print('++++++++++++++')
-        return None
+        print('raising exception')
+        raise NoResponseException()
+        #return None
 
     response = client_sock.recv_pyobj()['response']
+    print(response)
     if isinstance(response, list):
         rep = []
         for message in response:
