@@ -3,22 +3,9 @@ import cloudpickle
 from myqueue import Queue as myQueue
 from threading import Thread
 
-class Client:
-    '''
-    Clase base para implementar los clientes de ScrollMAT.\
-    Cada cliente tiene acceso a un conjunto de funciones\
-    elementales como son, entrar a un servidor de ScrollMAT,\
-    registrarse en ScrollMAT, enviar un mensaje a otro cliente, \
-    enviar un mensaje a un grupo, enviar un archivo a otro cliente,\
-    publicar un archivo en un grupo, etc. Incluso, este cliente implementara \
-    las funcionalidades elementales para poder enviar los mensajes cifrados, o sea \
-    cifrado y descifrado de mensajes y archivos. \
-    Para instanciar un cliente, es necesario introducir la direccion de un servidor de \
-    ScrollMAT conocido, y pasar por todo el mecanismo de registro, login , etc, o simplemente \
-    se puede cargar un cliente ya guardado utilizando la funcionalidad estatica *restore_client()*.
-    '''
+class Client:  
 
-    def __init__(self, *args, **kwargs):  
+    def __init__(self, *args, **kwargs):   #todo implement get server addrs from config file
         # .*args = server_addr, self.ip, self.port si se esta instanciando un cliente nuevo, 
         # #si no *args = client_identifier para restaurarlo'
         # if len(args) <= 2:
@@ -27,7 +14,7 @@ class Client:
         try:
             Client.restore_client(args[1])
         except:
-            self.servers = []      # trackers addresses, tuple (ip,port)
+            self.servers = []      # trackers addresses, tuple (ip,port)  
             self.ip = args[1]           
             self.port = args[2]
             self.contacts_info = {}          # {contact_name : {'addr': address (*tuple ip,port*), 'online' : bool,  'conversation': myQueue(messages)}}
@@ -44,6 +31,8 @@ class Client:
         if self.registered:
             self.loggin()
 
+        self.context = zmq.Context()
+
         self.__start_client__(ip, port)
 
         self.process_pending_messages()
@@ -54,10 +43,10 @@ class Client:
 
     def __start_client__(self, ip, port):
         #this is to start the client sockets
-        context = zmq.Context()             #! this might be troublesome, in case of error check if this is the cause, try to solve it with global context
-        self.incoming_sock = context.socket(zmq.REP)
-        self.incoming_sock.bind(f'tcp://{self.ip}:{self.port}')
-        self.outgoing_sock = context.socket(zmq.REQ)
+        #context = zmq.Context()             #! this might be troublesome, in case of error check if this is the cause, try to solve it with global context
+        self.incoming_sock = self.context.socket(zmq.REP)
+        self.incoming_sock.bind(f'tcp://{self.ip}:{self.port}') 
+        self.outgoing_sock = self.context.socket(zmq.REQ)
         
 
     def __handle_incomming__(self):
@@ -126,8 +115,8 @@ class Client:
     def __send_message__(self, target_address, message) -> bool:   # target_address is a string of the form 'ip_address:port' #//done
         reply = None
         if self.outgoing_sock.closed:
-            context = zmq.Context()
-            self.outgoing_sock = context.socket(zmq.REQ)
+            #context = zmq.Context()
+            self.outgoing_sock = self.context.socket(zmq.REQ)
         try:
             self.outgoing_sock.connect(f'tcp://{target_address}')
         except zmq.ZMQError:
@@ -186,7 +175,7 @@ class Client:
         socket = context.socket(sock_type) 
         return socket
 
-    def send_message_group(self, target_group, message):
+    def send_message_group(self, target_group, message):    #todo
         '''
         Envia un mensaje al grupo destino.
         '''
@@ -291,8 +280,8 @@ class Client:
 
     def check_online(self, contact_name):                   #// auxiliary method, done
         c_ip,c_port = self.contacts_info[contact_name]['addr']
-        contx = zmq.Context()
-        socket = contx.socket(zmq.REQ)
+        #contx = zmq.Context()
+        socket = self.context.socket(zmq.REQ)
         socket.connect(f'tcp://{c_ip}:{c_port}')
         socket.send_pyobj('ping')
         tries = 10
@@ -327,6 +316,13 @@ class Client:
 
     def delete_contact(self. contact_name):
         self.contacts_info.pop(contact_name)
+
+    def exit(self):
+        self.save_client_state()
+        self.incoming_sock.close()
+        self.outgoing_sock.close()
+        
+        
         
 
 
@@ -424,31 +420,96 @@ class Message:
         
 
 
+# def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
+#     '''
+#     Tracker request can only contain 3 actions: check_client, register_client\
+#             or locate.
+#     @param tracker_ip   : Know tracker ip to ask to
+#     @param tracker_port : The tracker port where service is active
+#     @param action       : Desire action to execute on the tracker
+#     @kwargs             : Keyword args with the following keys:
+#     user := username to trackto (either to check or register or locate)
+#     ip   := ip of the sender (only needed for check or register)
+#     port := port of the sender service (only needed for check or register)
+#     '''
+#     # Create the client socket
+#     client_context = zmq.Context()
+#     client_sock = client_context.socket(zmq.REQ)
+#     assert(action in ('locate', 'check_client', 'register_client'))
+#     client_sock.connect("tcp://%s:%d" % (tracker_ip, tracker_port))
+#     if action in ('check_client', 'register_client'):
+#         client_sock.send_json(
+#             {'action': action,
+#                 'id': kwargs['user'],
+#                 'ip': kwargs['ip'],
+#                 'port': kwargs['port']
+#                 }
+#             )
+#     # The other posibility is only 'locate'
+#     else:
+#         client_sock.send_json(
+#             {
+#                 'action': action,
+#                 'id': kwargs['user']
+#             }
+#             )
+#     # Check if server is responding
+#     # clients should test for a server response to know whether
+#     # it's active, or is down.
+#     tries = 8
+#     timeout = 1000
+#     while tries:
+#         if client_sock.poll(timeout=timeout, flags=zmq.POLLIN):
+#             break
+#         tries -= 1
+#         timeout *= 2
+#     # No server response
+#     if not tries:
+#         client_sock.close()
+#         raise NoResponseException
+
+#     response = client_sock.recv_json()['response']
+#     client_sock.close()
+#     return response
+
 def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
     '''
     Tracker request can only contain 3 actions: check_client, register_client\
-            or locate.
-    @param tracker_ip   : Know tracker ip to ask to
+         or locate.
+    @param tracker_ip   : Known tracker ip to ask to
     @param tracker_port : The tracker port where service is active
     @param action       : Desire action to execute on the tracker
     @kwargs             : Keyword args with the following keys:
     user := username to trackto (either to check or register or locate)
     ip   := ip of the sender (only needed for check or register)
     port := port of the sender service (only needed for check or register)
+    message:= Message (object)
     '''
     # Create the client socket
     client_context = zmq.Context()
     client_sock = client_context.socket(zmq.REQ)
-    assert(action in ('locate', 'check_client', 'register_client'))
+    assert(action in ('locate', 'check_client', 'register_client', 'enqueue_message'))
     client_sock.connect("tcp://%s:%d" % (tracker_ip, tracker_port))
     if action in ('check_client', 'register_client'):
         client_sock.send_json(
             {'action': action,
-                'id': kwargs['user'],
-                'ip': kwargs['ip'],
-                'port': kwargs['port']
-                }
+             'id': kwargs['user'],
+             'ip': kwargs['ip'],
+             'port': kwargs['port']
+             }
             )
+    elif action == "enqueue_message":
+        message = kwargs['message']
+        marshalled_message = dumps(message)
+        client_sock.send_json(
+            {
+                'action': action,
+                'marshalled': marshalled_message,
+                'ip': kwargs['ip'],
+                'port': kwargs['port'],
+                'id': message.receiver
+            }
+        )
     # The other posibility is only 'locate'
     else:
         client_sock.send_json(
@@ -473,5 +534,11 @@ def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
         raise NoResponseException
 
     response = client_sock.recv_json()['response']
+    if isinstance(response, list):
+        rep = []
+        for message in response:
+            rep.append(loads(message))
+        response = rep
+
     client_sock.close()
     return response
