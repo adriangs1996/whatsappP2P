@@ -1,6 +1,7 @@
 import zmq
 import pickle
 import json
+import cloudpickle
 from myqueue import Queue as myQueue
 from threading import Thread
 
@@ -25,111 +26,164 @@ class Client:
         if len(args) <= 2:
             Client.restore_client(args[1])
         else:
-            self.server = args[1]       # tracker addresss
-            self.ip = args[2]           
-            self.port = args[3]
-            self.contacts = {}          # {contact_name : address}
-            self.chats = {}             # {contact_name : list with the messages in the conversation}
+            self.servers = []      # trackers addresses, tuple (ip,port)
+            self.ip = args[1]           
+            self.port = args[2]
+            self.contacts_info = {}          # {contact_name : {'addr': address (*tuple ip,port*), 'online' : bool,  'conversation': myQueue(messages)}}
+            #self.chats = {}             # {contact_name : list with the messages in the conversation}
             self.outgoing_queue = {}    # {contact_name : queue with pending messages}
+            #self.online_contacts = {}
             self.registered = False
 
-        with zmq.Context() as context:
-            self.server_sock = context.socket(zmq.REQ)
-            self.server_sock.connect(f'http://{self.server_addr}')
+        #self.server_sock = self.__open_socket__()
+        #self.is_sock_open = True
+        #self.server_sock.connect(f'http://{self.server_addr}')
             
     
-        #! here all things refering to registration and login
-    
+        if self.registered:
+            self.loggin()
 
         self.__start_client__(ip, port)
 
         self.process_pending_messages()
         
-        self.__handle_incomming__()   
-
+        incomming_thread = Thread(target= self.__handle_incomming__)
+        incomming_thread.setDaemon(True)
+        incomming_thread.start()
 
     def __start_client__(self, ip, port):
         #this is to start the client sockets
-        with zmq.Context() as context:
-            self.incoming_sock = context.socket(zmq.REP)
-            self.incoming_sock.bind(f'tcp://{self.ip}:{self.port}')
-            self.outgoing_sock = context.socket(zmq.REQ)
+        context = zmq.Context()             #! this might be troublesome, in case of error check if this is the cause, try solve it with global context
+        self.incoming_sock = context.socket(zmq.REP)
+        self.incoming_sock.bind(f'tcp://{self.ip}:{self.port}')
+        self.outgoing_sock = context.socket(zmq.REQ)
+        
 
     def __handle_incomming__(self):
-        while from_server = self.server_sock.recv():
+        while True:
+            messg = self.incoming_sock.recv_pyobj()
+            if not isinstance(messg, Message):
+                if messg == 'ping':
+                    self.incoming_sock.send_string('online')
+            else:
+                self.__log_message__(messg.sender, messg)
+                # try:
+                #     self.contacts_info[messg.sender]['conversation'].smart_enqueue(messg)
+                # except KeyError:
+                #     self.contacts_info[messg.sender]['conversation'] = myQueue([messg])
+                self.incoming_sock.send_json({'response': True})
 
 
-    def register(self, username, password, phone):
+    def register(self, username, password, phone) -> bool:          #// done
     
         '''
         Este procedimiento se reserva para la creacion de clientes que no esten presentes en el\
         servidor. Permite interactuar con el servidor para registrar un nuevo cliente \
         proporcionando un nombre de usuario, contrasena, y un telefono, y el servidor devolvera\
         un id con el que se identifica ese cliente a partir de ese momento.
-        '''
-        self.username = username
-        self.passsword = hash(password)
-        self.phone = phone
-        self.server_sock.send_json(
-            {   'action': 'register',
-                'id': self.identifier,
-                'ip': self.ip,
-                'port': self.port,
-                'password': self.passsword,
-                'phone': self.phone
-            }
-            )
-        reply = server_sock.recv()
-        self.identifier = (int)reply
+        '''        
+                
+        for t_ip,t_port in self.servers:
+            try:
+                reply = request_tracker_action(t_ip, t_port, 'register_client', user= username, ip= self.ip, port= self.port)
+                if reply:
+                    self.registered = True
+                    self.username = username
+                    break            
+            except:
+                continue
 
-    def loggin(self):"Ok"
+        return self.registered
+
+
+    def loggin(self):"Ok"                                   #// done
         '''
         Una vez registrado el cliente, con cada inicio de sesion habra que logearse en el sistema.\
         Para ello se utiliza el identificador del cliente y se le proporciona el usuario y el passw\
         al servidor. El cliente debe guardar un hash de este passsword en algun estado, para poder\
         enviarlo al servidor con cada inicio de sesion.
         '''
-        raise NotImplementedError()
+        for t_ip,t_port in self.servers:
+            try:
+                reply = request_tracker_action(t_ip, t_port, 'check_client', user= self.username, ip= self.ip, port= self.port)
+                for item in reply:
+                    self.__log_message__(item.sender, item)
 
-    def send_message_client(self, target_client, message) -> bool:
+
+    def send_message_client(self, target_client, message) -> bool:          #//done, i think
         '''
         Envia un mensaje al cliente destino.
         '''
-        address = self.contacts[target_client]
+        if target_client not in self.contacts_info.keys():
+            self.add_contact(target_client)
+        address = self.get_peer_address(target_client)
         if not self.__send_message__(address, message):
             self.enqueue_message(target_client, message)
         else:
-            if target_client not in self.chats.keys():
-                self.chats[target_client] = myQueue()
-            self.chats[target_client].smart_enqueue(message)
+            self.__log_message__(target_client, message)
 
-    def __send_message__(self, target_address, message) -> bool:
+    def __send_message__(self, target_address, message) -> bool:   # target_address is a string of the form 'ip_address:port' #//done
         reply = None
+        if self.outgoing_sock.closed:
+            context = zmq.Context()
+            self.outgoing_sock = context.socket(zmq.REQ)
         try:
-            ready = self.outgoing_sock.get_monitor_socket(addr= target_address)
-            if not ready:
-                self.outgoing_sock.connect(target_address)
-            self.outgoing_sock.send_pyobj(message)
-            reply = self.outgoing_sock.recv_string() 
-            if not reply:
-                return False
-            return True          
-        except:
+            self.outgoing_sock.connect(f'tcp://{target_address}')
+        except zmq.ZMQError:
+            #self.outgoing_sock = self.__open_socket__()
+            #self.outgoing_sock.connect(f'tcp://{target_address}')
+            return False
+        
+        self.outgoing_sock.send_pyobj(message)
+
+        tries = 10
+        tout = 1000
+        while tries:
+            if self.outgoing_sock.poll(timeout= tout):
+                break
+            tries -= 1
+            tout *= 2
+        if not tries:
+            self.outgoing_sock.close()
             return False
 
-    def process_pending_messages(self):
+        reply = self.outgoing_sock.recv_json()
+        return reply['response']
+       
+    def process_pending_messages(self):                     #// done
         for contact in outgoing_queue.keys():
-            address = self.contacts[contact]
+            address = self.get_peer_address(contact)
             queue = outgoing_queue[contact]
             while not queue.isEmpty():
                 message = queue.peek()
                 if not self.__send_message__(address, message):
-                    if not self.__send_message__(self.server, message):
-                        break
+                    if self.send_message_to_server_queue(message):
+                        self.__log_message__(contact, message)
+                        self.outgoing_queue[contact].pop()                
                 else:
+                    self.__log_message__(contact, message)
                     self.outgoing_queue[contact].pop()
+
+    
+    def send_message_to_server_queue(self, message):        #// done
+        for t_ip,t_port in self.servers
+            try:
+                reply = request_tracker_action(t_ip, t_port, 'enqueue_message', message)
+                if reply:
+                    return True
+            except:
+                return False
                     
-                
+
+    def __open_socket__(self, sock_type= zmq.REQ):          #// done
+        '''
+        creates a zmq socket for you
+
+        >- sock_type: one of the zmq types of socket. e.g: zmq.REQ
+        '''
+        context = zmq.Context()
+        socket = context.socket(sock_type) 
+        return socket
 
     def send_message_group(self, target_group, message):
         '''
@@ -137,76 +191,128 @@ class Client:
         '''
         raise NotImplementedError()
 
-    def enqueue_message(self, target_client, message):
+    def add_contact(self, contact_name):                    #// done
+        self.contacts_info[contact_name] = {}
+        self.update_contact_info(contact_name)
+
+    def update_contact_info(self, contact_name):            #// done
+        for (t_ip, t_port) in self.servers:
+            try:
+                response = request_tracker_action(t_ip, t_port, 'locate', user= contact_name)
+                if response:
+                    self.contacts_info[contact_name]['addr'] = response
+                    return
+            except:
+                continue   
+       
+    
+    def get_peer_address(self, peer_name):                  #//auxiliary method, done
+        r_ip,r_port = self.contacts_info[peer_name]['addr']
+        return f'{r_ip}:{r_port}'
+
+    def enqueue_message(self, target_client, message):      #//auxiliary method, done
         if target_client not in self.outgoing_queue.keys():
             self.outgoing_queue[target_client] = myQueue(auto_growth= True)
         self.outgoing_queue[target_client].enqueue(message)        
 
-    def send_adj_client(self, target_client, target_file):
+
+    def __log_message__(self, target_client, message):      #//auxiliary method, done
+        if self.contacts_info[target_client]['conversation'] == None:
+            self.contacts_info[target_client]['conversation'] = myQueue()
+        self.contacts_info[target_client]['conversation'].smart_enqueue(message)
+
+    def send_adj_client(self, target_client, target_file):  #todo
         '''
         Envia un envie archivo al cliente destino.
         '''
         raise NotImplementedError()
 
-    def post_adj(self, target_group, target_file):
+    def post_adj(self, target_group, target_file):          #todo
         '''
         Envia un archivo a todos los miembros del grupo destino.
         '''
         raise NotImplementedError()
 
-    def __encrypt(self, message, key):
+    def __encrypt(self, message, key):                      #todo
         '''
         Mecanismo para cifrar un mensaje
         '''
+        raise NotImplementedError()
 
-    def __decrypt(self, message, key):
+    def __decrypt(self, message, key):                      #todo
         '''
         Mecanismo para descifrar un mensaje
         '''
         raise NotImplementedError()
 
-    def __generate_client_key(self):
+    def __generate_client_key(self):                        #todo
         '''
         Genera una llave privada y otra global para este cliente. \
         Este procedimiento debe ser invocado como parte del mecanismo de registro.
         '''
         raise NotImplementedError()
 
-    def save_client_state(self):
+    def save_client_state(self):                            #// done, i think
         '''
         Salva el estado del cliente, de modo que cada inicio de la app no requiera de todo un nuevo\
         proceso de registro y nueva generacion de las llaves, asi como de las sesiones.
         '''
+
         d={}
         for key in self.__dict__.keys():
-            if type(self.__dict__[key]) is not zmq.Socket:
-                
+            if type(self.__dict__[key]) is not zmq.Socket:                
                 d[key] = self.__dict__[key]
-        json.dump(d, open(f'wsp_client_{self.identifier}', mode ='w'))
+        filestream = open(f'wsp_client_{self.identifier}', mode ='wb')
+        cloudpickle.dump(d, filestream)
+        filestream.close()
 
     @staticmethod
-    def restore_client(identifier):
+    def restore_client(identifier):                         #// done, i think
         '''
         Carga el estado de un cliente guardado y devuelve una instancia de Client listo para usar.
         '''
-        client_info = json.load(f'wsp_client_{self.identifier}'))
+        filestream = open(f'wsp_client_{self.identifier}', mode= 'rb')
+        client_info = cloudpickle.load(filestream)
+        filestream.close()
 
         for key in client_info:
             self.__dict__[key] = client_info[key]
 
-    async def discover_online_contacts(self):
+    async def discover_online_contacts(self):               #// done, not conviced
         '''
         Realiza un algoritmo de autodescubrimiento, basado en la informacion guardada sobre\
         los contactos de este cliente, de modo que se puede saber quienes estan online. \
         Este metodo debe ser asincrono para poder ejecutarse cada cierto periodo de tiempo\
         y que actualice los datos del cliente cada vez que obtenga resultados.
-        '''
-        raise NotImplementedError()
+        '''        
+        for contact in self.contacts_info.keys():
+            self.contacts_info[contact]['online'] = self.check_online(contact)
 
-    # Permitir que los clientes sean usados como llaves de diccionarios.
-    # Un posible valor de hash para los clientes puede ser una combinacion de
-    # su llave publica con su llave privada
+    def check_online(self, contact_name):                   #// auxiliary method, done
+        c_ip,c_port = self.contacts_info[contact_name]['addr']
+        contx = zmq.Context()
+        socket = contx.socket(zmq.REQ)
+        socket.connect(f'tcp://{c_ip}:{c_port}')
+        socket.send_pyobj('ping')
+        tries = 10
+        time = 1000
+        while tries:
+            if socket.poll(timeout= time, flags= zmq.POLLIN):
+                break
+            tries -= 1
+            time *= 2
+        if not tries:
+            socket.close()
+            return False
+        reply = socket.recv_string()
+        socket.close()
+        if reply:
+            return True
+
     def __hash__(self):
+        # Permitir que los clientes sean usados como llaves de diccionarios.
+        # Un posible valor de hash para los clientes puede ser una combinacion de
+        # su llave publica con su llave privada
         raise NotImplementedError()
 
 
@@ -265,7 +371,8 @@ class Message:
     una marca temporal que indica el momento en que se envio.
     '''
     def __init__(self, text, sender, timestamp):
-        self.sender = sender
+        self.sender = sender    # username : string
+        self.receiver           # reciever username : string
         self.text = text
         self.timestamp = timestamp
 
@@ -288,8 +395,69 @@ class Message:
         return self.sender
 
     @property
+    def receiver(self):
+        '''
+        Devuelve el cliente al que se le envió el mensaje
+        '''
+        return self.receiver
+
+    @property
     def timestamp(self):
         '''
         Devuelve la fecha en la que se envio el mensaje
         '''
         return self.timestamp
+        
+
+
+def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
+    '''
+    Tracker request can only contain 3 actions: check_client, register_client\
+            or locate.
+    @param tracker_ip   : Know tracker ip to ask to
+    @param tracker_port : The tracker port where service is active
+    @param action       : Desire action to execute on the tracker
+    @kwargs             : Keyword args with the following keys:
+    user := username to trackto (either to check or register or locate)
+    ip   := ip of the sender (only needed for check or register)
+    port := port of the sender service (only needed for check or register)
+    '''
+    # Create the client socket
+    client_context = zmq.Context()
+    client_sock = client_context.socket(zmq.REQ)
+    assert(action in ('locate', 'check_client', 'register_client'))
+    client_sock.connect("tcp://%s:%d" % (tracker_ip, tracker_port))
+    if action in ('check_client', 'register_client'):
+        client_sock.send_json(
+            {'action': action,
+                'id': kwargs['user'],
+                'ip': kwargs['ip'],
+                'port': kwargs['port']
+                }
+            )
+    # The other posibility is only 'locate'
+    else:
+        client_sock.send_json(
+            {
+                'action': action,
+                'id': kwargs['user']
+            }
+            )
+    # Check if server is responding
+    # clients should test for a server response to know whether
+    # it's active, or is down.
+    tries = 8
+    timeout = 1000
+    while tries:
+        if client_sock.poll(timeout=timeout, flags=zmq.POLLIN):
+            break
+        tries -= 1
+        timeout *= 2
+    # No server response
+    if not tries:
+        client_sock.close()
+        raise NoResponseException
+
+    response = client_sock.recv_json()['response']
+    client_sock.close()
+    return response
