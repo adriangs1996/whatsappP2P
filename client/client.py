@@ -49,6 +49,10 @@ class Client:
         self.incomming_thread.setDaemon(True)
         self.incomming_thread.start()
 
+        self.pending_thread = Thread(target= self.__pending_loop__)
+        self.incomming_thread.setDaemon(True)
+        self.incomming_thread.start()
+
     def __start_client__(self):
         #this is to start the client sockets
         #context = zmq.Context()             
@@ -152,6 +156,9 @@ class Client:
             return True
 
     def __send_message__(self, target_address, message) -> bool:   # target_address is a string of the form 'ip_address:port' #//done
+        if not self.outgoing_queue.isEmpty:
+            return False
+        
         reply = None
         if self.outgoing_sock.closed:
             self.outgoing_sock = self.context.socket(zmq.REQ)
@@ -177,7 +184,11 @@ class Client:
         reply = self.outgoing_sock.recv_json()
         print(reply['response'])
         return reply['response']
-       
+
+    def __pending_loop__(self):
+        while True:
+            self.process_pending_messages()
+
     def process_pending_messages(self):                     #// done
         for contact in self.outgoing_queue.keys():
             address = self.get_peer_address(contact)
