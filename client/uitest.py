@@ -141,7 +141,11 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
 
     def button_add_contact_clicked(self):
         cont = self.listWidget_2.currentItem()
-        if cont:
+        if cont.contact_name in self.client.contacts_info:
+            item = CustomListItem(cont.text(), self.client.contacts_info[cont.contact_name])
+            item.setText(item.contact_name)
+            self.listWidget_contacts.addItem(item)
+        elif cont:
             newinfo = self.client.add_contact(cont.text())
             item = CustomListItem(cont.text(), newinfo)
             item.setText(item.contact_name)
@@ -166,12 +170,12 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
             
             
     def contact_list_item_selected(self):
-        item = self.listWidget_contacts.currentItem()
+        item = self.listWidget_contacts.currentItem().contact_name
         print(item)
-        self.client.active_user = item.contact_name
-        self.label_2.setText(item.contact_name)
-        print(item.contact_data['conversation'])
-        self.show_conversation(item.contact_data['conversation'])
+        self.client.active_user = item
+        self.label_2.setText(item)
+        #print(item.contact_data['conversation'])
+        self.show_conversation(self.client.contacts_info[item]['conversation'])
  
 
 
@@ -204,6 +208,8 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
         for mesg in messg_list:
             self.paint_message(mesg.sender, mesg.text, 0x001 + (mesg.sender == self.client.username))
 
+
+
     def handle_incomming_messages(self):
         queue = self.client.incomming_queue
         print(queue)
@@ -223,6 +229,14 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
                 else:
                     print('sender is not active contact')
                     # self.client.__log_message__(sender, message)
+            
+            pending_queue = self.client.pending_users
+            while not pending_queue.isEmpty:
+                new_usr = pending_queue.pop()
+                print('new user incoming: {0}'.format(new_usr))
+                item = CustomListItem(new_usr, {})
+                item.setText(new_usr)
+                self.listWidget_contacts.addItem(item)
             
             
     def paint_message(self, sender, message_text, alignment):

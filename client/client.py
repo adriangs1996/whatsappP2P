@@ -27,6 +27,7 @@ class Client:
             self.registered = False
             self.active_user = None
             self.incomming_queue = myQueue(capacity=50, auto_growth= True, items=[])
+            self.pending_users = myQueue(capacity=50, auto_growth= True, items=[])
 
         #self.server_sock = self.__open_socket__()
         #self.is_sock_open = True
@@ -58,28 +59,6 @@ class Client:
 
     def __handle_incomming__(self):
         while True:
-            # if self.incoming_sock.closed:
-            #     self.incoming_sock = self.context.socket(zmq.REP)
-            #     self.incoming_sock.bind(f'tcp://{self.ip}:{self.port}')
-            # tries = 8
-            # timeout = 10
-            # while tries:
-            #     if self.incoming_sock.poll(timeout=timeout, flags=zmq.POLLIN):
-            #         print('connection in handle incomming')
-            #         break
-            #     print('no connection in handle incomming')
-            #     self.incoming_sock.setsockopt(zmq.LINGER, 0)
-            #     self.incoming_sock.close()
-            #     self.incoming_sock = self.context.socket(zmq.REP)
-            #     self.incoming_sock.bind(f'tcp://{self.ip}:{self.port}')
-            #     # client_sock.send_json(json_to_send)
-            #     tries -= 1
-            #     timeout *= 2
-            # # No server response
-            # if not tries:
-            #     # client_sock.close()
-            #     print('not tries in handle incomming')
-            #     continue
             try:
                 messg = self.incoming_sock.recv_pyobj()
             except Exception as error:
@@ -279,11 +258,11 @@ class Client:
         except KeyError:
             print('key error logging message')
             self.add_contact(target_client)
+            self.pending_users.enqueue(target_client)
         if queue_temp == None:
             queue_temp = myQueue(capacity=50, auto_growth=False, items=[])
             self.contacts_info[target_client]['conversation'] = queue_temp
         queue_temp.smart_enqueue(message)
-        self.contacts_info['unread'] += 1
         print('message logged')
 
     def send_adj_client(self, target_client, target_file):  #todo
