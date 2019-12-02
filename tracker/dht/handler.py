@@ -4,9 +4,6 @@ import re
 
 
 def main():
-    url_regex = re.compile(
-        r'(?P<host>([A-Za-z0-9]|\.)+):(?P<port>[1-9][0-9]{3, 4})'
-        )
     argsparser = argparse.ArgumentParser()
     argsparser.add_argument('-i', help='ip address for this node')
     argsparser.add_argument('-p', type=int, help='port for this node')
@@ -23,8 +20,8 @@ def main():
     if target_url is None:
         chord.Node(ip, port)
     else:
-        url_dict = url_regex.match(target_url).groupdict()
-        chord.Node(ip, port, (url_dict['host'], int(url_dict['port'])))
+        target_url = target_url.split(':')
+        chord.Node(ip, port, (target_url[0], int(target_url[1])))
 
 
 if __name__ == '__main__':

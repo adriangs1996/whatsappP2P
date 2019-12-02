@@ -5,6 +5,7 @@ to talk to.
 from hashlib import sha1
 import logging
 from threading import Thread
+from cloudpickle import dumps, loads
 import zmq
 from dht.chord import request, NoResponseException
 
@@ -19,18 +20,19 @@ def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
     '''
     Tracker request can only contain 3 actions: check_client, register_client\
          or locate.
-    @param tracker_ip   : Know tracker ip to ask to
+    @param tracker_ip   : Known tracker ip to ask to
     @param tracker_port : The tracker port where service is active
     @param action       : Desire action to execute on the tracker
     @kwargs             : Keyword args with the following keys:
     user := username to trackto (either to check or register or locate)
     ip   := ip of the sender (only needed for check or register)
     port := port of the sender service (only needed for check or register)
+    message:= Message (object)
     '''
     # Create the client socket
     client_context = zmq.Context()
     client_sock = client_context.socket(zmq.REQ)
-    assert(action in ('locate', 'check_client', 'register_client'))
+    assert(action in ('locate', 'check_client', 'register_client', 'enqueue_message'))
     client_sock.connect("tcp://%s:%d" % (tracker_ip, tracker_port))
     if action in ('check_client', 'register_client'):
         client_sock.send_json(
@@ -40,6 +42,18 @@ def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
              'port': kwargs['port']
              }
             )
+    elif action == "enqueue_message":
+        message = kwargs['message']
+        marshalled_message = dumps(message)
+        client_sock.send_json(
+            {
+                'action': action,
+                'marshalled': marshalled_message,
+                'ip': kwargs['ip'],
+                'port': kwargs['port'],
+                'id': message.receiver
+            }
+        )
     # The other posibility is only 'locate'
     else:
         client_sock.send_json(
@@ -64,6 +78,12 @@ def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
         raise NoResponseException
 
     response = client_sock.recv_json()['response']
+    if isinstance(response, list):
+        rep = []
+        for message in response:
+            rep.append(loads(message))
+        response = rep
+
     client_sock.close()
     return response
 
@@ -107,13 +127,18 @@ class ClientInformationTracker:
         # If client is correctly checked, then update its address
         if response is not None:
             response = request(
-                'chord://%s:d' % chord_peer,
+                'chord://%s:%d' % chord_peer,
                 'put',
                 (client_ip, client_port, client_key)
             )
-            return True
 
-        return False
+        # Return, if any, all queued messages for this client
+            response = request(
+                "chord://%s:%d" % chord_peer,
+                "dequeue_messages",
+                client_key
+            )
+            return response
 
     def register_client(self, client_id, client_ip, client_port):
         # This check is needed to ensure 160 bits key for sha1
@@ -137,7 +162,7 @@ class ClientInformationTracker:
                 client_id)
 
             response = request(
-                'chord://%s:d' % chord_peer,
+                'chord://%s:%d' % chord_peer,
                 'put',
                 (client_ip, client_port, client_key)
             )
@@ -182,6 +207,21 @@ class ClientInformationTracker:
         '''
         return True
 
+    def enqueue_message(self, client_id, client_ip, client_port, message):
+        user_id = sha1(bytes("%s" % client_id, 'ascii'))
+
+        chord_peer = self.__find_alive_chord()
+
+        try:
+            request(
+                "chord://%s:%d" % chord_peer,
+                'enqueue_message',
+                (client_ip, client_port, user_id, message)
+            )
+            return True
+        except NoResponseException:
+            return False
+
     def __dispatch_object_method(self, method, *args):
         assert hasattr(self, method)
         func = getattr(self, method)
@@ -203,13 +243,16 @@ class ClientInformationTracker:
             client_id = req['id']
             args = [client_id]
 
-            if action == 'register':
+            if action in ('check_client', 'register_client', 'enqueue_message'):
                 cliend_address = req['ip']
                 client_port = req['port']
                 args += [cliend_address, client_port]
 
             elif action == 'locate':
                 action = '__serve_client_info'
+
+            if action == "enqueue_message":
+                args += [req['marshalled']]
 
             result = self.__dispatch_object_method(action, *args)
             server_sock.send_json({'response': result})
