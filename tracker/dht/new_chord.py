@@ -4,6 +4,7 @@ from time import sleep
 import threading
 import logging
 import random
+import re
 from cloudpickle import dumps, loads
 
 logging.basicConfig(
@@ -18,6 +19,27 @@ STABILIZE_INTERVAL = 2
 FINGERS_INTERVAL = 1
 UPDATE_SUCCESORS_INTERVAL = 1
 MAX_SUCCESORS = 7  # log2(160) ~ 7
+URL_REGEX = re.compile(
+    r'chord://(?P<host>([A-Za-z0-9]|\.)+):(?P<port>[1-9][0-9]{3,4})'
+    )
+
+
+# RPC PROTOCOL
+def request(url, action, *args, timeout=100, tries=8):
+    '''
+    Request a procedure on node identified by url.
+    '''
+    url_dict = URL_REGEX.match(url).groupdict()
+    host, port = url_dict['host'], int(url_dict['port'])
+
+    # TODO: WRAPP AROUND THIS TO ALLOW ACTIONS IN CALLBACKS
+    # Create a remote Object to represent the connection
+    remote = RemoteNodeReference(host, port)
+    if hasattr(remote, action):
+        func = getattr(remote, action)
+        return func(*args)
+    else:
+        raise Exception("Invalid Request")
 
 
 def between(c, a, b):
@@ -156,11 +178,42 @@ class RemoteNodeReference(object):
     @safe_connection_required
     def notify(self, node):
         self.send(['notify', RemoteNodeReference(node.ip, node.port)])
+    
+    @safe_connection_required
+    def simple_put(self, key, val):
+        self.send(["simple_put", key, val])
+    
+    @safe_connection_required
+    def put(self, key, val):
+        self.send(["put", key, val])
+    
+    @safe_connection_required
+    def get(self, key):
+        self.send(["get", key])
+        response = loads(self.recv)
+        return response
+    
+    @safe_connection_required
+    def enqueue_message(self, key, msg):
+        self.send(["enqueue_message", key, msg])
+    
+    @safe_connection_required
+    def simple_enqueue(self, key, msg):
+        self.send(["simple_enqueue", key, msg])
+    
+    @safe_connection_required
+    def simple_dequeue(self, key):
+        self.send(["simple_dequeue", key])
+        
+    @safe_connection_required
+    def dequeue_messages(self, key):
+        self.send(["dequeue_messages", key])
+        msg_list = loads(self.recv())
+        return msg_list
 
 
 # TODO: Agregar logica para almacenar las llaves, y negociarlas con la entrada\
     #  de nuevos nodos
-# TODO: Agregar logica para registrar callbacks
 class Node:
     def __init__(self, node_ip, node_port, dest_host=None):
         self.ip = node_ip
@@ -170,6 +223,7 @@ class Node:
         self.fingers = [None] * KEY_SIZE
         self.callbacks = {}
         self.storage = {}
+        self.messages = {}
 
         self.join(dest_host)
 
@@ -299,7 +353,8 @@ class Node:
                     if isinstance(response, (RemoteNodeReference, Node)):
                         response = (response.ip, response.port)
 
-                    client_sock.sendall(dumps(response) + b"!!")
+                    if response is not None:
+                        client_sock.sendall(dumps(response) + b"!!")
             client_sock.close()
 
     def start_service(self):
@@ -312,3 +367,76 @@ class Node:
         stabilize_daemon.start()
         fix_fingers_daemon.start()
         update_succesors_daemon.start()
+
+    def put(self, key, val):
+        if between(key, self.id(1), self.predecessor().id(1)):
+            self.storage[key] = val
+            # make that our succesors update the key
+            for node in [self.fingers[0]] + self.succesors:
+                if node.ping():
+                    node.simple_put(key, val)
+        else:
+            node = self.find_successor(key)
+            node.put(key, val)
+
+    def simple_put(self, key, val):
+        self.storage[key] = val
+
+    def get(self, key):
+        # If we are responsible for key, return it
+        if between(key, self.id(1), self.predecessor().id(1)):
+            return self.storage.get(key, default=False)
+        else:
+            # Find the node responsible for that key
+            node = self.find_successor(key)
+            return node.get(key)
+
+    def enqueue_message(self, key, msg):
+        # If we are responsible for key, then enqueue msg
+        if between(key, self.id(1), self.predecessor().id(1)):
+            try:
+                self.messages[key].append(msg)
+            except KeyError:
+                self.messages[key] = [msg]
+            # Update queue of succesors
+            for node in [self.fingers[0]] + self.succesors:
+                if node.ping():
+                    node.simple_enqueue(key, msg)
+        else:
+            # Search for responsible of key
+            node = self.find_successor(key)
+            node.enqueue_message(key, msg)
+
+    def simple_enqueue(self, key, msg):
+        try:
+            self.messages[key].append(msg)
+        except KeyError:
+            self.messages[key] = []
+
+    def dequeue_messages(self, key):
+        # If We are responsible for key, dequeue it and return
+        if between(key, self.id(1), self.predecessor().id(1)):
+            msg_list = self.messages.get(key, default=[])
+            self.messages[key] = []
+            # Remove msgs entries in succesors
+            for node in [self.fingers[0]] + self.succesors:
+                if node.ping():
+                    node.simple_dequeue(key)
+            return msg_list
+        else:
+            # Find responsible for key
+            node = self.find_successor(key)
+            response = node.dequeue_messages(key)
+            return response
+
+    def simple_dequeue(self, key):
+        self.messages[key] = []
+
+    def register(self, callback_name, callback):
+        self.callbacks[callback_name] = callback
+
+    def unregister(self, callback_name):
+        try:
+            self.callbacks.pop(callback_name)
+        except KeyError:
+            pass

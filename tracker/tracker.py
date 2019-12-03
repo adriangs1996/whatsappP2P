@@ -7,7 +7,7 @@ import logging
 from threading import Thread
 from cloudpickle import dumps, loads
 import zmq
-from dht.chord import request, NoResponseException
+from dht.new_chord import request, NoResponseException
 
 
 logging.basicConfig(
@@ -125,11 +125,12 @@ class ClientInformationTracker:
         response = request("chord://%s:%d" % chord_peer, 'get', client_key)
 
         # If client is correctly checked, then update its address
-        if response is not None:
+        if response:
             response = request(
                 'chord://%s:%d' % chord_peer,
                 'put',
-                (client_ip, client_port, client_key)
+                client_key,
+                (client_ip, client_port,)
             )
 
         # Return, if any, all queued messages for this client
