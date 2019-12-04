@@ -391,9 +391,14 @@ class Node:
             self.succesors = successors
 
     def get_succesors(self):
-        return [
-            (node.ip, node.port) for node in self.succesors[:MAX_SUCCESORS - 1]
-        ]
+        if len(self.succesors) == MAX_SUCCESORS:
+            return [
+                (node.ip, node.port) for node in self.succesors[:MAX_SUCCESORS - 1]
+            ]
+        else:
+            return[
+                (node.ip, node.port) for node in self.succesors
+            ]
 
     def recv(self, sock):
         data = b''
@@ -482,7 +487,7 @@ class Node:
     def get(self, key):
         # If we are responsible for key, return it
         if between(key, self.predecessor().id(1), self.id(1)):
-            return self.storage.get(key, default=False)
+            return self.storage.get(key, False)
         else:
             # Find the node responsible for that key
             node = self.find_successor(key)
