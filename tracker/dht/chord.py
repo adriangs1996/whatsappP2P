@@ -15,7 +15,7 @@ logging.basicConfig(
 KEY_SIZE = 160
 MAX_TRIES = 5
 DATA_RECV = 1024
-STABILIZE_INTERVAL = 2
+STABILIZE_INTERVAL = 1
 FINGERS_INTERVAL = 1
 UPDATE_SUCCESORS_INTERVAL = 1
 MAX_SUCCESORS = 7  # log2(160) ~ 7
@@ -337,11 +337,11 @@ class Node:
         return self._predecessor
 
     def notify(self, remote_node_reference):
-        if self.predecessor() is None or between(
+        if self.predecessor() is None or not self.predecessor().ping() or between(
             remote_node_reference.id(),
             self.predecessor().id(1),
             self.id(1)
-        ) or not self.predecessor().ping():
+        ):
             self._predecessor = remote_node_reference
 
     def find_successor(self, key):
@@ -458,12 +458,12 @@ class Node:
         fix_fingers_daemon.start()
         update_succesors_daemon.start()
 
-        while 1:
-            logging.debug(" ** ******* NODE STATE *********\n" +
-                          f"Succesors: {self.succesors}\n" +
-                          f"Predecesor: {self.predecessor()}\n" +
-                          f"Current Succesor: {self.succesor()}")
-            sleep(5)
+        # while 1:
+        #     logging.debug(" ** ******* NODE STATE *********\n" +
+        #                   f"Succesors: {self.succesors}\n" +
+        #                   f"Predecesor: {self.predecessor()}\n" +
+        #                   f"Current Succesor: {self.succesor()}")
+        #     sleep(5)
 
     def put(self, key, val):
         if between(key, self.predecessor().id(1), self.id(1)):
