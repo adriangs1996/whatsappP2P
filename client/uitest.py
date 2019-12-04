@@ -10,6 +10,9 @@ from client import Client, Message
 from PyQt5 import QtCore, QtGui, QtWidgets
 from threading import Thread
 
+
+LEFTALGN = 0x001
+RIGHTALGN = 0x002
 class Ui_MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         QtWidgets.QMainWindow.__init__(self)
@@ -181,14 +184,19 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
 
     def button_send_clicked(self):
         text = self.textEdit.toPlainText()
-        contact_name = self.listWidget_contacts.currentItem().contact_name
-        if not contact_name:
-            contact_name = self.listWidget2_contacts.currentItem().contact_name
-            if not contact_name:
-                return                
+        contact = self.listWidget_contacts.currentItem()
+        if not contact:
+            contact = self.listWidget_2.currentItem()
+            if not contact:
+                return
+            else:
+                contact_name = self.listWidget_2.currentItem().contact_name
+        else:
+            contact_name = self.listWidget_contacts.currentItem().contact_name
+
         target = self.client.contacts_info[contact_name]
         if self.client.send_message_client(contact_name, text):
-            self.paint_message(self.client.username, text, 2)
+            self.paint_message(self.client.username, text, RIGHTALGN)
             messg_list = target['conversation']             
             if messg_list.count < self.conversList.count():
                 self.conversList.takeItem(0)
@@ -197,8 +205,7 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
     def check_regitration(self):
         if not self.client.registered:
             self.dialog.show()
-        else:
-            self.setWindowTitle("WhatsAppP2P--{0}".format(self.client.username))
+        
         
         
     def show_conversation(self, messg_list):
@@ -206,7 +213,7 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
         if messg_list == None:
             return
         for mesg in messg_list:
-            self.paint_message(mesg.sender, mesg.text, 0x001 + (mesg.sender == self.client.username))
+            self.paint_message(mesg.sender, mesg.text, LEFTALGN + (mesg.sender == self.client.username))
 
 
 
@@ -225,7 +232,7 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
                 print('sender: {0}\nactive contact: {1}'.format(sender, active_contact))
                 if active_contact == sender:
                     print('active contact is sender')
-                    self.paint_message(sender, message.text, 0x001)  
+                    self.paint_message(sender, message.text, LEFTALGN)  
                 else:
                     print('sender is not active contact')
                     # self.client.__log_message__(sender, message)

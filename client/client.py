@@ -6,6 +6,10 @@ from myqueue import Queue as myQueue
 from threading import Thread
 from random import randint
 loads = cloudpickle.loads
+dumps = cloudpickle.dumps
+
+PEND = 0
+NOTPEND = 1
 
 class Client:  
 
@@ -22,7 +26,7 @@ class Client:
             self.port = randint(3001, 9000)
             self.contacts_info = {}          # {contact_name : {'addr': address (*tuple ip,port*), 'online' : bool, 'unread': int, 'conversation': myQueue(messages)}}
             #self.chats = {}             # {contact_name : list with the messages in the conversation}
-            self.outgoing_queue = {}    # {contact_name : queue with pending messages}
+            self.outgoing_queue = myQueue(capacity= 50, auto_growth= True, items=[])    # myQueue with pending messages
             #self.online_contacts = {}
             self.registered = False
             self.active_user = None
@@ -43,15 +47,15 @@ class Client:
 
         self.__start_client__()
 
-        self.process_pending_messages()
+        #self.process_pending_messages()
         
         self.incomming_thread = Thread(target= self.__handle_incomming__)
         self.incomming_thread.setDaemon(True)
         self.incomming_thread.start()
 
         self.pending_thread = Thread(target= self.__pending_loop__)
-        self.incomming_thread.setDaemon(True)
-        self.incomming_thread.start()
+        self.pending_thread.setDaemon(True)
+        self.pending_thread.start()
 
     def __start_client__(self):
         #this is to start the client sockets
@@ -59,6 +63,7 @@ class Client:
         self.incoming_sock = self.context.socket(zmq.REP)
         self.incoming_sock.bind(f'tcp://{self.ip}:{self.port}') 
         self.outgoing_sock = self.context.socket(zmq.REQ)
+        self.pending_sock = self.context.socket(zmq.REQ)
         
 
     def __handle_incomming__(self):
@@ -92,7 +97,7 @@ class Client:
         proporcionando un nombre de usuario, contrasena, y un telefono, y el servidor devolvera\
         un id con el que se identifica ese cliente a partir de ese momento.
         '''        
-                
+        reply = None      
         for t_ip,t_port in self.servers:
             try:
                 reply = request_tracker_action2(t_ip, t_port, 'register_client', user= username, ip= self.ip, port= self.port)
@@ -106,9 +111,9 @@ class Client:
                 print('no response in register')
                 continue
 
-            if not reply:
-                print('not reply')
-                raise Exception
+        if not reply:
+            print('not reply')
+            raise sException
 
         return self.registered
 
@@ -148,15 +153,15 @@ class Client:
         if target_client not in self.contacts_info.keys():
             self.add_contact(target_client)
         address = self.get_peer_address(target_client)
-        if not self.__send_message__(address, message):
+        if not self.__send_message__(address, message, flag= NOTPEND):
             self.enqueue_message(target_client, message)
             return False
         else:
             self.__log_message__(target_client, message)
             return True
 
-    def __send_message__(self, target_address, message) -> bool:   # target_address is a string of the form 'ip_address:port' #//done
-        if not self.outgoing_queue.isEmpty:
+    def __send_message__(self, target_address, message, flag= NOTPEND) -> bool:   # target_address is a string of the form 'ip_address:port' #//done
+        if not self.outgoing_queue.isEmpty and flag:
             return False
         
         reply = None
@@ -168,17 +173,25 @@ class Client:
             return False
         
         self.outgoing_sock.send_pyobj(message)
-        print('message sent')
+        print('message sent, waiting for response')
 
-        tries = 10
-        tout = 1000
+        tries = 3
+        tout = 10
         while tries:
             if self.outgoing_sock.poll(timeout= tout, flags= zmq.POLLIN):
                 break
+            print('out of poll')
+            # self.outgoing_sock.setsockopt(zmq.LINGER, 0)
+            # self.outgoing_sock.close()
+            # self.outgoing_sock = self.context.socket(zmq.REQ)
+            # self.outgoing_sock.connect(f'tcp://{target_address}')
+            
             tries -= 1
             tout *= 2
         if not tries:
+            self.outgoing_sock.setsockopt(zmq.LINGER, 0)
             self.outgoing_sock.close()
+            print('socket closed')
             return False
 
         reply = self.outgoing_sock.recv_json()
@@ -190,25 +203,31 @@ class Client:
             self.process_pending_messages()
 
     def process_pending_messages(self):                     #// done
-        for contact in self.outgoing_queue.keys():
-            address = self.get_peer_address(contact)
-            queue = self.outgoing_queue[contact]
-            while not queue.isEmpty():
-                message = queue.peek()
-                if not self.__send_message__(address, message):
-                    if self.send_message_to_server_queue(message):
-                        self.__log_message__(contact, message)
-                        self.outgoing_queue[contact].pop()                
-                else:
-                    self.__log_message__(contact, message)
-                    self.outgoing_queue[contact].pop()
+        #for contact in self.outgoing_queue.keys():
+        # print('process peding running')
+        queue = self.outgoing_queue
+        # print('count queue: {0}'.format(queue.count))
+        while not queue.isEmpty:
+            message = queue.peek()
+            address = self.get_peer_address(message.receiver) 
+            print('attempting to resend message')               
+            if not self.__send_message__(address, message, flag= PEND):
+                if self.send_message_to_server_queue(message):
+                    print('message sent to server')
+                    self.__log_message__(message.receiver, message)
+                    queue.pop()                
+            else:
+                self.__log_message__(message.receiver, message)
+                queue.pop()
 
     
-    def send_message_to_server_queue(self, message):        #// done
+    def send_message_to_server_queue(self, message): 
+        print('attempting to send messsage to server')       #// done
         for t_ip,t_port in self.servers:
             try:
-                reply = request_tracker_action(t_ip, t_port, 'enqueue_message', message)
+                reply = request_tracker_action2(t_ip, t_port, 'enqueue_message', ip= self.ip, port= self.port, message= message)
                 if reply:
+                    print('message sent to server')
                     return True
             except NoResponseException:
                 print('no response in send to queue')
@@ -234,7 +253,7 @@ class Client:
     def add_contact(self, contact_name):                    #// done
         self.contacts_info[contact_name] = {}
         self.update_contact_info(contact_name)
-        self.contacts_info['unread'] = 0
+        self.contacts_info[contact_name]['unread'] = 0
         temp = myQueue(capacity=50, auto_growth=False, items=[])
         self.contacts_info[contact_name]['conversation'] = temp
         return self.contacts_info[contact_name]
@@ -254,12 +273,17 @@ class Client:
         r_ip,r_port = self.contacts_info[peer_name]['addr']
         return f'{r_ip}:{r_port}'
 
-    def enqueue_message(self, target_client, message):   
-        temp_queue = self.outgoing_queue   #//auxiliary method, done
-        if target_client not in temp_queue.keys():
-            temp = myQueue(capacity= 50, auto_growth= True, items= [])
-            temp_queue[target_client] = temp
-        temp_queue[target_client].enqueue(message)        
+    def enqueue_message(self, target_client, message): 
+        print('entered enqueue message') 
+        if not self.outgoing_queue:
+            self.outgoing_queue = myQueue(capacity= 50, auto_growth= True,items= [])
+        self.outgoing_queue.enqueue(message)
+        print('message enqueued')
+        print(self.outgoing_queue.count)
+        # if target_client not in temp_queue.keys():
+            # temp = myQueue(capacity= 50, auto_growth= True, items= [])
+            # temp_queue[target_client] = temp
+        # temp_queue[target_client].enqueue(message)        
 
 
     def __log_message__(self, target_client, message):  
@@ -524,13 +548,14 @@ def get_json_from_action(action, **kwargs):
 
     elif action == "enqueue_message":
         message = kwargs['message']
-        marshalled_message = dumps(message)
+        marshalled_message = cloudpickle.dumps(message)
+        message_id = message.receiver
         json_res = {
                 'action': action,
                 'marshalled': marshalled_message,
                 'ip': kwargs['ip'],
                 'port': kwargs['port'],
-                'id': message.receiver
+                'id': message_id
             }
     # The other posibility is only 'locate'
     else:
