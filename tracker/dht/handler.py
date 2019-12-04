@@ -18,10 +18,11 @@ def main():
         print("Suply ip and port for node")
         exit(0)
     if target_url is None:
-        chord.Node(ip, port)
+        node = chord.Node(ip, port)
     else:
         target_url = target_url.split(':')
-        chord.Node(ip, port, (target_url[0], int(target_url[1])))
+        node = chord.Node(ip, port, (target_url[0], int(target_url[1])))
+    node.start_service()
 
 
 if __name__ == '__main__':

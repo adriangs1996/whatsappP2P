@@ -1,611 +1,506 @@
-'''
-CHORD Protocol Implementation for WhatsappP2P
-'''
-import logging
-import re
+import socket
 from hashlib import sha1
-from threading import Thread, BoundedSemaphore
 from time import sleep
-import zmq
-
-blacklist_mutex = BoundedSemaphore()
-rpc_mutex = BoundedSemaphore()
-
-REQ = zmq.REQ
-REP = zmq.REP
+import threading
+import logging
+import random
+import re
+from cloudpickle import dumps, loads
 
 logging.basicConfig(
         format="%(asctime)s %(levelname)s:%(message)s",
         level=logging.DEBUG
      )
 
+KEY_SIZE = 160
+MAX_TRIES = 5
+DATA_RECV = 1024
+STABILIZE_INTERVAL = 2
+FINGERS_INTERVAL = 1
+UPDATE_SUCCESORS_INTERVAL = 1
+MAX_SUCCESORS = 7  # log2(160) ~ 7
 URL_REGEX = re.compile(
     r'chord://(?P<host>([A-Za-z0-9]|\.)+):(?P<port>[1-9][0-9]{3,4})'
-    )
-KEY_SIZE = 160
-MAX_KEY = 2**KEY_SIZE
-SLEEP_TIME = 3
-
-context = zmq.Context()
-
-
-class NoResponseException(Exception):
-    '''
-    Exception raised when send a message and no server response was found after
-    a timeout.
-    '''
-    pass
-
-
-class KeyAddress(tuple):
-    '''
-    Represent the responding Node Address
-    '''
-    pass
-
-
-class KeySelf(KeyAddress):
-    '''
-    Represent the address of the requesting Node
-    '''
-    pass
-
-
-class ClientAddress(tuple):
-    '''
-    Represents the address of a client to store in the DHT
-    '''
-    pass
-
-
-def _in_interval(node, node_left, node_right):
-    # handle normal case (a < b)
-    if node_left <= node_right:
-        return node_left <= node <= node_right
-
-    # handle the 'ring' case
-    return node_left <= node or node <= node_right
-
-
-def __connect_node(host, port):
-    sock = context.socket(zmq.REQ)
-    sock.connect('tcp://%s:%s' % (host, port))
-    return sock
-
-
-def __parse_peer(data):
-    return KeyAddress(
-        [
-            data['ip_address'],
-            data['port'],
-            data['id']
-        ]
     )
 
 
 # RPC PROTOCOL
-def request(url, action, key, timeout=100, tries=8):
+def request(url, action, *args):
     '''
     Request a procedure on node identified by url.
     '''
     url_dict = URL_REGEX.match(url).groupdict()
     host, port = url_dict['host'], int(url_dict['port'])
 
-    sock = __connect_node(host, port)
-
-    if isinstance(key, tuple):
-        body = {
-            'action': action,
-            'ip_address': key[Node.Ip],
-            'port': key[Node.Port],
-            'id': key[Node.Id]
-        }
-        try:
-            body['message'] = key[3]
-        except IndexError:
-            pass
+    # TODO: WRAPP AROUND THIS TO ALLOW ACTIONS IN CALLBACKS
+    # Create a remote Object to represent the connection
+    remote = RemoteNodeReference(host, port)
+    if hasattr(remote, action):
+        func = getattr(remote, action)
+        return func(*args)
     else:
-        body = {'action': action, 'key': key}
-    try:
-        sock.send_json(body)
+        raise Exception("Invalid Request")
 
-        while tries:
-            # Wait for an incoming response
-            if sock.poll(timeout=timeout, flags=zmq.POLLIN):
-                response = sock.recv_json()
+
+def between(c, a, b):
+    a = a % 2**KEY_SIZE
+    b = b % 2**KEY_SIZE
+    c = c % 2**KEY_SIZE
+    if a < b:
+        return a <= c < b
+    return a <= c or c < b
+
+
+class NoResponseException(Exception):
+    pass
+
+
+def repeat_after_time(sleepTime):
+    def func_wrapper(func):
+        def inner(self, *args, **kwargs):
+            while 1:
+                sleep(sleepTime)
+                ret = func(self, *args, **kwargs)
+                if not ret:
+                    return
+        return inner
+    return func_wrapper
+
+
+def repeat_when_socket_fail(retries):
+    def func_wrapper(func):
+        def inner(self, *args, **kwargs):
+            retry_count = 0
+            while retry_count < retries:
+                try:
+                    ret = func(self, *args, **kwargs)
+                    return ret
+                except socket.error:
+                    sleep(2**retry_count)
+                    retry_count += 1
+            if retry_count == retries:
+                raise NoResponseException
+        return inner
+    return func_wrapper
+
+
+def safe_connection_required(func):
+    def inner(self, *args, **kwargs):
+        # Make a Thread safe socket connection
+        self.lock.acquire()
+        self.open_connection()
+        ret = func(self, *args, **kwargs)
+        self.close_connection()
+        self.lock.release()
+        return ret
+    return inner
+
+
+class RemoteNodeReference(object):
+    '''
+    Reference to a remote node to wrapp RPC and ease the implementation
+    '''
+    def __init__(self, node_ip, node_port):
+        self.ip = node_ip
+        self.port = node_port
+        self.lock = threading.BoundedSemaphore()
+
+    def __str__(self):
+        return f"<{self.ip}:{self.port}>"
+    
+    def __repr__(self):
+        return str(self)
+
+    def id(self, offset=0):
+        digest = int(sha1(bytes("%s:%d" % (self.ip, self.port), 'ascii')).hexdigest(), 16)
+        return (digest + offset) % 2**(KEY_SIZE)
+
+    def open_connection(self):
+        self.socket_ = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket_.connect((self.ip, self.port))
+
+    def close_connection(self):
+        self.socket_.close()
+        self.socket_ = None
+
+    def send(self, data):
+        self.socket_.sendall(dumps(data) + b"!!")
+        self.trace = data
+
+    def recv(self):
+        data = b''
+        while 1:
+            rec = self.socket_.recv(64)
+            if rec[-2:] == b"!!":
+                data += rec[:-2]
                 break
-            tries -= 1
-            timeout *= 2
+            data += rec
+        return data
 
-        if not tries:
-            sock.close()
-            raise NoResponseException()
-
-        # Parsing the response.
-
-        # Response in case we ask for a node's identifier key
-        if response['result'] == 'peer':
-            return __parse_peer(response)
-
-        # Response in case of succesfull ping
-        if response['result'] == 'alive':
-            peer_key = response['key']
-            return KeyAddress([host, port, peer_key])
-
-        if response['result'] == 'None':
-            return None
-
-    finally:
-        sock.close()
-    return response['result']
-
-
-class Node:
-    '''
-    Peer of the chord ring. Every peer is identified by its address.
-    Once peers are succesfully inserted in the chord ring, they start
-    serving RPC forever.
-    '''
-    Id = 2
-    Port = 1
-    Ip = 0
-    MaxSuccesorsList = 4
-
-    def __init__(self, ip_address, port, dest_host=None):
-        self.identifier = int(sha1(bytes(
-            "%s%d" % (ip_address, port),
-            'ascii')
-        ).hexdigest(), 16)
-
-        self.finger = [None] * KEY_SIZE
-        self.storage = {}
-        self.ip_address = ip_address
-        self.port = port
-        self.node = KeySelf([self.ip_address, self.port, self.identifier])
-        self.succesor = []
-        self.queued_messages = {}
-        self.predecesor = None
-        self.next_finger = 0
-        self.lock = BoundedSemaphore()
-        logging.debug("** Node %s:%d with key %d is online and ready **" % (
-            self.ip_address, self.port, self.identifier
-            ))
-
-        if dest_host is not None:
-            self.join("chord://%s:%d" % dest_host)
-        else:
-            self.finger[0] = self.node
-
-        # Start RPC server
-        rpcserver = Thread(target=self.__serve_rpc)
-        rpcserver.setDaemon(True)
-        rpcserver.start()
-
-        # Periodically calls stabilize
-        stabi = Thread(target=self.periodically_stabilize)
-        stabi.setDaemon(True)
-        stabi.start()
-
-        # Periodicallye calls fix_fingers
-        ffingers = Thread(target=self.periodically_fix_fingers)
-        ffingers.setDaemon(True)
-        ffingers.start()
-
-        # Periodically calls check_predecessor
-        cpredecessor = Thread(target=self.periodically_check_predecessor)
-        cpredecessor.setDaemon(True)
-        cpredecessor.start()
-
-        ffingers.join()
-        cpredecessor.join()
-        rpcserver.join()
-
-    def _get_live_succesor(self):
-        blacklist = []
-        result = self.node
-        for node in self.succesor:
-            try:
-                request(
-                    "chord://%s:%d" % (node[Node.Ip], node[Node.Port]),
-                    "ping",
-                    self.identifier,
-                    tries=1
-                )
-                # self.finger[0] = node
-                return node
-
-            except NoResponseException:
-                logging.debug("Failed")
-                blacklist.append(node)
-
-        self.succesor = [nod for nod in self.succesor if nod not in blacklist]
-
-        # for black_node in blacklist:
-        #     try:  # race condition here
-        #         logging.debug("Deleting {} from successor list".format(black_node))
-        #         self.succesor.remove(black_node)
-        #         logging.debug("Removed {}".format(black_node))
-        #     except ValueError:  # another process already remove it
-        #         logging.debug("Not removing it")
-        #     finally:
-        #         logging.debug("This is the blacklist {}".format(blacklist))
-        return result
-
-    def find_succesor(self, key):
-        '''
-        Find a new succesor for Node with identifier "key" if possible.
-        '''
-        # if our succesor is responsible for key, return it
-        succesor = self._get_live_succesor()
-        if succesor != self.node and _in_interval(
-            key,
-            (self.identifier + 1) % 2**KEY_SIZE,
-            succesor[Node.Id]
-        ):
-            return succesor
-
-        # otherwise, look for the closest preceding node of the key and ask
-        # for his succesor
-        target = self.closest_preceding_node(key)
-
-        if target == self.node:
-            return target
-
+    def ping(self):
         try:
-            self.lock.acquire()
-            response = request(
-                "chord://%s:%d" % (target[Node.Ip], target[Node.Port]),
-                'find_succesor',
-                key,
-                timeout=100,
-                tries=1
-            )
-            self.lock.release()
-            if response:
-                return response
-        except NoResponseException:
-            return self.node
+            sock = socket.socket()
+            sock.connect((self.ip, self.port))
+            sock.sendall(b"!!")
+            sock.close()
+            return True
+        except socket.error:
+            return False
+
+    @safe_connection_required
+    def get_succesors(self):
+        self.send(["get_succesors"])
+        response = self.recv()
+        if response == b"":
+            return []
+        response = loads(response)
+        return map(lambda x: RemoteNodeReference(x[0], x[1]), response)
+
+    @safe_connection_required
+    def succesor(self):
+        self.send(["succesor"])
+        response = self.recv()
+        response = loads(response)
+        return RemoteNodeReference(response[0], response[1])
+
+    @safe_connection_required
+    def predecessor(self):
+        self.send(["predecessor"])
+        response = loads(self.recv())
+        return RemoteNodeReference(response[0], response[1])
+
+    @safe_connection_required
+    def closest_preceding_node(self, key):
+        self.send(["closest_preceding_node", key])
+        response = loads(self.recv())
+        return RemoteNodeReference(response[0], response[1])
+
+    @safe_connection_required
+    def find_succesor(self, key):
+        self.send(["find_successor", key])
+        response = loads(self.recv())
+        return RemoteNodeReference(response[0], response[1])
+
+    @safe_connection_required
+    def notify(self, node):
+        remote_node_reference = RemoteNodeReference(node.ip, node.port)
+        remote_node_reference.lock = None
+        self.send(['notify', remote_node_reference])
+    
+    @safe_connection_required
+    def simple_put(self, key, val):
+        self.send(["simple_put", key, val])
+    
+    @safe_connection_required
+    def put(self, key, val):
+        self.send(["put", key, val])
+    
+    @safe_connection_required
+    def get(self, key):
+        self.send(["get", key])
+        response = loads(self.recv())
+        return response
+    
+    @safe_connection_required
+    def enqueue_message(self, key, msg):
+        self.send(["enqueue_message", key, msg])
+    
+    @safe_connection_required
+    def simple_enqueue(self, key, msg):
+        self.send(["simple_enqueue", key, msg])
+    
+    @safe_connection_required
+    def simple_dequeue(self, key):
+        self.send(["simple_dequeue", key])
+        
+    @safe_connection_required
+    def dequeue_messages(self, key):
+        self.send(["dequeue_messages", key])
+        msg_list = loads(self.recv())
+        return msg_list
+    
+    @safe_connection_required
+    def get_keys(self, key):
+        self.send(["get_keys", key])
+        key_val, key_msg = loads(self.recv())
+        return key_val, key_msg
+    
+    @safe_connection_required
+    def remove_key(self, key):
+        self.send(["remove_key", key])
+
+
+# TODO: Agregar logica para almacenar las llaves, y negociarlas con la entrada\
+    #  de nuevos nodos
+class Node:
+    def __init__(self, node_ip, node_port, dest_host=None):
+        self.ip = node_ip
+        self.port = node_port
+        self.succesors = []
+        self._predecessor = None
+        self.fingers = [None] * KEY_SIZE
+        self.callbacks = {}
+        self.storage = {}
+        self.messages = {}
+
+        self.join(dest_host)
+
+    def __str__(self):
+        return f"<{self.ip}:{self.port}>"
+
+    def __repr__(self):
+        return str(self)
+
+    def join(self, dest_host):
+        if dest_host:
+            remote_node_reference = RemoteNodeReference(dest_host[0], dest_host[1])
+            succ = self.fingers[0] = remote_node_reference.find_succesor(self.id())
+            # Negotiate with succesor the keys
+            key_val, key_msg = succ.get_keys(self.id())  # keys <= self.identifier
+            for k, v in key_val:
+                self.simple_put(k, v)
+            for k, msg in key_msg:
+                self.simple_enqueue(k, msg)
+
+        else:
+            self.fingers[0] = self
+
+    def get_keys(self, key):
+        # Get our storaged keys that are now responsability of key
+        key_val = []
+        key_msg = []
+        keys = []
+        for storkey in self.storage.keys():
+            if storkey <= key:
+                key_val.append((storkey, self.storage[storkey]))
+                keys.append(storkey)
+        for storkey in self.messages.keys():
+            if storkey <= key:
+                key_msg.append((storkey, self.messages[storkey]))
+                keys.append(storkey)
+        node = self.succesors[-1:]
+        if node and node[0].ping():
+            for k in keys:
+                node[0].remove_key(k)
+        return key_val, key_msg
+
+    def remove_key(self, key):
+        self.storage.pop(key, None)
+        self.messages.pop(key, None)
+
+    def id(self, offset=0):
+        digest = int(sha1(bytes("%s:%d" % (self.ip, self.port), 'ascii')).hexdigest(), 16)
+        return (digest + offset) % 2**(KEY_SIZE)
+
+    def ping(self):
+        return True
+
+    def succesor(self) -> RemoteNodeReference:
+        for remote in [self.fingers[0]] + self.succesors:
+            if remote.ping():
+                self.fingers[0] = remote
+                return remote
+        logging.info("No Succesor Found, reseting to ourselves")
+        self.fingers[0] = self
+        return self
+
+    @repeat_after_time(STABILIZE_INTERVAL)
+    @repeat_when_socket_fail(MAX_TRIES)
+    def stabilize(self):
+        succesor = self.succesor()
+        if succesor.id() != self.fingers[0].id(1):
+            self.fingers[0] = succesor
+
+        pred = succesor.predecessor()
+        if pred is not None and between(pred.id(), self.id(1), succesor.id(1)) and self.id(1) != succesor.id() and pred.ping():
+            self.fingers[0] = pred
+
+        self.succesor().notify(self)
+        return True
+
+    def predecessor(self):
+        return self._predecessor
+
+    def notify(self, remote_node_reference):
+        if self.predecessor() is None or between(remote_node_reference.id(), self.predecessor().id(1), self.id(1)) or not self.predecessor().ping():
+            self._predecessor = remote_node_reference
+
+    def find_successor(self, key):
+        if self.predecessor() and between(key, self.predecessor().id(1), self.id(1)):
+            return self
+        node = self.find_predecessor(key)
+        return node.succesor()
+
+    def find_predecessor(self, key):
+        node = self
+
+        if node.succesor().id() == node.id():
+            return node
+        while not between(key, node.id(1), node.succesor().id(1)):
+            node = node.closest_preceding_node(key)
+        return node
 
     def closest_preceding_node(self, key):
-        '''
-        Return the closest preceding node of "key" if exist, returns
-        self otherwise.
-        '''
-        for i in range(KEY_SIZE - 1, -1, -1):
-            if self.finger[i] and _in_interval(
-                    self.finger[i][Node.Id],
-                    (self.identifier + 1) % 2**KEY_SIZE,
-                    (key - 1) % 2**KEY_SIZE
-            ):
-                return self.finger[i]
+        for node in reversed(self.succesors + self.fingers):
+            if node is not None and between(node.id(), self.id(1), key) and node.ping():
+                return node
+        return self
 
-        return self.node
-
-    def join(self, url):
-        '''
-        Connect peer to a CHORD ring given the address of a known CHORD peer.
-        '''
-        succ = request(url, 'find_succesor', self.identifier, timeout=5000, tries=1)
-        self.succesor.append(succ)
-        logging.debug("Set {} as our succesor".format(self.succesor[0]))
-        self.predecesor = None
-
-    def reconciliate(self, node=None):
-        """
-        Wrapper method to obtain the succesor list of a node.
-        """
-        return self.succesor
-
-    def stabilize(self):
-        '''
-        Verifies node's inmediate successor and notify it about us.
-        '''
-        succesor = self._get_live_succesor()
-        if succesor != self.node:
-            try:
-                identifier = request(
-                    "chord://%s:%d" % (succesor[Node.Ip], succesor[Node.Port]),
-                    'get_predecessor',
-                    succesor[Node.Id],
-                    tries=1
-                )
-            except NoResponseException:
-                identifier = None
-
-            if identifier and identifier != self.node and _in_interval(
-                identifier[Node.Id],
-                (self.identifier + 1) % 2**KEY_SIZE,
-                (succesor[Node.Id] - 1) % 2**KEY_SIZE
-            ):
-                # Negotiate succesors list with new succesor
-                succesor_list = request(
-                    "chord://%s:%d" % (identifier[Node.Ip], identifier[Node.Port]),
-                    "reconciliate",
-                    self.identifier,
-                    tries=1
-                )
-
-                if len(succesor_list) >= Node.MaxSuccesorsList:
-                    succesor_list.pop()
-                if identifier not in succesor_list:
-                    logging.info("Added {} as our succesor".format(identifier))
-                    succesor_list.insert(0, identifier)
-                self.succesor = succesor_list
-
-            if identifier and identifier != self.node:
-                try:
-                    request(
-                        "chord://%s:%d" % (
-                            identifier[Node.Ip],
-                            identifier[Node.Port]
-                            ),
-                        'notify',
-                        self.node,
-                        tries=1
-                    )
-                except NoResponseException:
-                    pass
-
-            elif identifier is None:
-                try:
-                    request(
-                        "chord://%s:%d" % (
-                            succesor[Node.Ip],
-                            succesor[Node.Port]
-                        ),
-                        'notify',
-                        self.node,
-                        tries=1
-                    )
-                except NoResponseException:
-                    succesor = None
-
-        if self.predecesor and not self.succesor:
-            logging.info("Added {} as our succesor from predecesor".format(self.predecesor))
-            try:
-                request(
-                            "chord://%s:%d" % (
-                                self.predecesor[Node.Ip],
-                                self.predecesor[Node.Port]
-                                ),
-                            'notify',
-                            self.node,
-                            tries=1
-                        )
-                self.succesor.insert(0, self.predecesor)
-            except NoResponseException:
-                pass
-
-    def periodically_stabilize(self):
-        '''
-        Runs stabilize periodically.
-        '''
-        while True:
-            sleep(SLEEP_TIME)
-            self.stabilize()
-
-    def periodically_fix_fingers(self):
-        '''
-        Runs fix fingers periodically.
-        '''
-        while True:
-            sleep(SLEEP_TIME)
-            self.fix_fingers()
-
-    def periodically_check_predecessor(self):
-        '''
-        Runs check_predecessor periodically.
-        '''
-        while True:
-            sleep(SLEEP_TIME)
-            self.check_predecessor()
-
-    def check_predecessor(self):
-        '''
-        Checks whether predeces has failed.
-        '''
-        try:
-            request(
-                "chord://%s:%d" % (
-                    self.predecesor[Node.Ip],
-                    self.predecesor[Node.Port]
-                     ),
-                'ping', self.identifier,
-                tries=1
-            )
-        except(NoResponseException, TypeError):
-            logging.debug("No predecesor found")
-            self.predecesor = None
-
-    def notify(self, node):
-        '''
-        "node" thinks it might be our predecesor.
-        '''
-        self.check_predecessor()
-        if self.predecesor is None or (_in_interval(
-            node[Node.Id],
-            (self.predecesor[Node.Id] + 1) % 2**KEY_SIZE,
-            (self.identifier - 1) % 2**KEY_SIZE
-        ) and self.predecesor != node):
-
-            logging.info('Set {} as predecesor in notify'.format(node))
-            self.predecesor = node
-
-    def get_predecessor(self, key=None):
-        '''
-        Wrapper around predecesor property to serve a RPC.
-        '''
-        return self.predecesor
-
+    @repeat_after_time(FINGERS_INTERVAL)
     def fix_fingers(self):
-        '''
-        Refreshes finger table entries.
-        '''
-        self.next_finger = self.next_finger + 1
-        if self.next_finger >= KEY_SIZE:
-            self.next_finger = 0
-        self.lock.acquire()
-        self.finger[self.next_finger] = self.find_succesor(
-            self.identifier + 2**(self.next_finger)
-        )
-        self.lock.release()
+        i = random.randrange(KEY_SIZE - 1) + 1
+        self.fingers[i] = self.find_successor(self.id(2**i))
+        return True
 
-    def _single_enqueue_message(self, key, val, message):
-        try:
-            self.queued_messages[key].append(message)
-        except KeyError:
-            self.queued_messages[key] = [message]
+    @repeat_after_time(UPDATE_SUCCESORS_INTERVAL)
+    def update_succesors(self):
+        # Manage cases when we are not alone in the ring
+        succ = self.succesor()
+        if succ.id() != self.id():
+            successors = [succ]
+            succ_list = succ.get_succesors()
+            if succ_list:
+                successors += succ_list
+            self.succesors = successors
 
-    def _enqueue_message(self, key, val, message):
-        try:
-            self.queued_messages[key].append(message)
-        except KeyError:
-            self.queued_messages[key] = [message]
+    def get_succesors(self):
+        return [(node.ip, node.port) for node in self.succesors[:MAX_SUCCESORS - 1]]
 
-        for peer in self.succesor:
+    def recv(self, sock):
+        data = b''
+        while 1:
+            rec = sock.recv(64)
+            if rec[-2:] == b"!!":
+                data += rec[:-2]
+                break
+            data += rec
+        return data
+
+    def __dispatch_rpc(self, action, *args):
+        if hasattr(self, action):
+            func = getattr(self, action)
+        else:
+            func = self.callbacks[action]
+        return func(*args)
+
+    def serve_rpc_requests(self):
+        # Create the socket server
+        server_sock = socket.socket()
+        server_sock.bind((self.ip, self.port))
+        server_sock.listen()  # TODO: Pherhaps use a threshold here??
+
+        while True:
             try:
-                request(
-                    "chord://%s:%d" % (peer[Node.Ip], peer[Node.Port]),
-                    "_single_enqueue_message",
-                    (val[0], val[1], key, message),
-                    tries=1
-                )
-            except NoResponseException:
-                pass
+                client_sock, _ = server_sock.accept()
+            except socket.error:
+                logging.info("Error in the RPC server socket. Continue")
+                continue
+            request = self.recv(client_sock)
+            # Ignore garbage
+            if request:
+                request = loads(request)
+                command = request[0]
+                request = request[1:]
+                # Valid command
+                if hasattr(self, command) or command in self.callbacks.keys():
+                    if command == "notify":  # This is needed because cloudpickle wont serialize lock objects
+                        request[0].lock = threading.BoundedSemaphore()
+                    response = self.__dispatch_rpc(command, *request)
 
-    def _dequeue_messages(self, key):
-        result = self.queued_messages.get(key, default=None)
-        if result is not None:
-            self.queued_messages[key].clear()
-        return result
+                    if isinstance(response, (RemoteNodeReference, Node)):
+                        response = (response.ip, response.port)
 
-    def dequeue_messages(self, key):
-        peer = self.closest_preceding_node(key)
+                    if response is not None:
+                        client_sock.sendall(dumps(response) + b"!!")
+            client_sock.close()
 
-        request(
-            "chord:%s:%d" % (peer[Node.Ip], peer[Node.Port]),
-            "_dequeue_messages",
-            key,
-            tries=1
-        )
+    def start_service(self):
+        stabilize_daemon = threading.Thread(target=self.stabilize)
+        fix_fingers_daemon = threading.Thread(target=self.fix_fingers)
+        update_succesors_daemon = threading.Thread(target=self.update_succesors)
+        rpc_daemon = threading.Thread(target=self.serve_rpc_requests)
 
-    def enqueue_message(self, key, val, message):
-        peer = self.closest_preceding_node(key)
+        rpc_daemon.start()
+        stabilize_daemon.start()
+        fix_fingers_daemon.start()
+        update_succesors_daemon.start()
 
-        request(
-            "chord://%s:%d" % (peer[Node.Ip], peer[Node.Port]),
-            "_enqueue_message",
-            (val[0], val[1], key, message)
-        )
-
-    def _get(self, key):
-        return self.storage.get(key, default=None)
-
-    def get(self, key):
-        '''
-        Returns value associated with key if we are responsible for it and we
-        have it.
-        '''
-        peer = self.closest_preceding_node(key)
-        result = request(
-            "chord://%s:%d" % (peer[Node.Ip], peer[Node.Port]),
-            "_get",
-            key
-        )
-        return result
+        while 1:
+            logging.debug(" ** ******* NODE STATE *********\n" +
+                          f"Succesors: {self.succesors}\n" +
+                          f"Predecesor: {self.predecessor()}\n" +
+                          f"Current Succesor: {self.succesor()}")
+            sleep(5)
 
     def put(self, key, val):
-        peer = self.closest_preceding_node(key)
+        if between(key, self.predecessor().id(1), self.id(1)):
+            self.storage[key] = val
+            # make that our succesors update the key
+            for node in [self.fingers[0]] + self.succesors:
+                if node.ping():
+                    node.simple_put(key, val)
+        else:
+            node = self.find_successor(key)
+            node.put(key, val)
 
-        request(
-            "chord://%s:%d" % (peer[Node.Ip], peer[Node.Port]),
-            "_put",
-            (val[0], val[1], key)
-        )
-
-    def _single_put(self, key, val):
-        '''
-        Update/ Defines a value associated with a key, only on this node
-        '''
+    def simple_put(self, key, val):
         self.storage[key] = val
 
-    def _put(self, key, val):
-        '''
-        Updates/Defines a value associated with a key on this node and all his
-        succesors.
-        '''
-        self.storage[key] = val
-        for node in self.succesor:
+    def get(self, key):
+        # If we are responsible for key, return it
+        if between(key, self.predecessor().id(1), self.id(1)):
+            return self.storage.get(key, default=False)
+        else:
+            # Find the node responsible for that key
+            node = self.find_successor(key)
+            return node.get(key)
+
+    def enqueue_message(self, key, msg):
+        # If we are responsible for key, then enqueue msg
+        if between(key, self.predecessor().id(1), self.id(1)):
             try:
-                request(
-                    "chord://%s:%d" % (node[Node.Ip], node[Node.Port]),
-                    "_single_put",
-                    (val[0], val[1], key)
-                )
-            except NoResponseException:
-                pass
+                self.messages[key].append(msg)
+            except KeyError:
+                self.messages[key] = [msg]
+            # Update queue of succesors
+            for node in [self.fingers[0]] + self.succesors:
+                if node.ping():
+                    node.simple_enqueue(key, msg)
+        else:
+            # Search for responsible of key
+            node = self.find_successor(key)
+            node.enqueue_message(key, msg)
 
-    def ping(self, key):
-        return 'alive'
+    def simple_enqueue(self, key, msg):
+        try:
+            self.messages[key].append(msg)
+        except KeyError:
+            self.messages[key] = []
 
-    def __dispatch_rpc(self, action, key, val=None):
-        assert hasattr(self, action)
-        func = getattr(self, action)
+    def dequeue_messages(self, key):
+        # If We are responsible for key, dequeue it and return
+        if between(key, self.predecessor().id(1), self.id(1)):
+            msg_list = self.messages.get(key, default=[])
+            self.messages[key] = []
+            # Remove msgs entries in succesors
+            for node in [self.fingers[0]] + self.succesors:
+                if node.ping():
+                    node.simple_dequeue(key)
+            return msg_list
+        else:
+            # Find responsible for key
+            node = self.find_successor(key)
+            response = node.dequeue_messages(key)
+            return response
 
-        if val is None:
-            result = func(key)
-            return result
-        return func(key, val)
+    def simple_dequeue(self, key):
+        self.messages[key] = []
 
-    def __serve_rpc(self):
+    def register(self, callback_name, callback):
+        self.callbacks[callback_name] = callback
 
-        context = zmq.Context()
-        rpc_sock = context.socket(zmq.REP)
-        rpc_sock.bind('tcp://*:%s' % self.port)
-
-        while True:
-            req = rpc_sock.recv_json()
-            val = None
-            action = req['action']
-            if action == 'notify':
-                ip_address, port, identifier =\
-                    req['ip_address'],\
-                    req['port'],\
-                    req['id']
-                key = KeyAddress([ip_address, port, identifier])
-
-            elif action == 'put':
-                key, ip_address, port =\
-                    req['id'],\
-                    req['ip_address'],\
-                    req['port']
-                val = ClientAddress([ip_address, port])
-
-            else:
-                key = req['key']
-
-            result = self.__dispatch_rpc(action, key, val)
-
-            if result is None:
-                rpc_sock.send_json({'result': 'None'})
-
-            elif isinstance(result, list):
-                rpc_sock.send_json({'result': result})
-
-            elif result == 'alive':
-                rpc_sock.send_json({'result': 'alive', 'key': self.identifier})
-
-            elif isinstance(result, (KeyAddress, KeySelf)):
-                rpc_sock.send_json({
-                    'result': 'peer',
-                    'ip_address': result[Node.Ip],
-                    'port': result[Node.Port],
-                    'id': result[Node.Id]
-                })
-
-            elif isinstance(result, ClientAddress):
-                rpc_sock.send_json({
-                    'result': 'address',
-                    'ip_address': result[Node.Ip],
-                    'port': result[Node.Port]
-                })
+    def unregister(self, callback_name):
+        try:
+            self.callbacks.pop(callback_name)
+        except KeyError:
+            pass

@@ -7,7 +7,7 @@ import logging
 from threading import Thread
 from cloudpickle import dumps, loads
 import zmq
-from dht.new_chord import request, NoResponseException
+from dht.chord import request, NoResponseException, RemoteNodeReference
 
 
 logging.basicConfig(
@@ -102,7 +102,7 @@ class ClientInformationTracker:
         @bootstrap_chord_peers: List of ip-port tuples of well known chord\
              nodes.
         '''
-        self.chord_peers = bootstrap_chord_peers   # [(ip, port)]
+        self.chord_peers = [RemoteNodeReference(node[0], node[1]) for node in bootstrap_chord_peers]   # [(ip, port)]
         self.ip_address = address
         self.port = port
 
@@ -156,7 +156,7 @@ class ClientInformationTracker:
 
         response = request("chord://%s:%d" % chord_peer, 'get', client_key)
 
-        if response is None:
+        if not response:
 
             logging.debug(
                 'Client %s is not registered, registering',
@@ -165,7 +165,8 @@ class ClientInformationTracker:
             response = request(
                 'chord://%s:%d' % chord_peer,
                 'put',
-                (client_ip, client_port, client_key)
+                client_key,
+                (client_ip, client_port)
             )
 
             logging.debug('Succesfully added %x to db', client_key)
@@ -189,16 +190,11 @@ class ClientInformationTracker:
         return response
 
     def __find_alive_chord(self):
-        for peer in self.chord_peers:
-            try:
-                request(
-                    "chord://%s:%d" % peer,
-                    'ping',
-                    0
-                )
-                return peer
-            except NoResponseException:
-                continue
+        for node in self.chord_peers:
+            if node.ping():
+                return (node.ip, node.port)
+        logging.info("[-] No known chord peer alive. Exiting")
+        exit(-1)
 
         raise Exception("No chord alive")
 
@@ -212,16 +208,8 @@ class ClientInformationTracker:
         user_id = sha1(bytes("%s" % client_id, 'ascii'))
 
         chord_peer = self.__find_alive_chord()
-
-        try:
-            request(
-                "chord://%s:%d" % chord_peer,
-                'enqueue_message',
-                (client_ip, client_port, user_id, message)
-            )
-            return True
-        except NoResponseException:
-            return False
+        request("chord://%s:%d" % chord_peer, 'enqueue_message', user_id, message)
+        return True
 
     def __dispatch_object_method(self, method, *args):
         assert hasattr(self, method)
