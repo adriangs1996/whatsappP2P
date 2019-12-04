@@ -32,7 +32,12 @@ def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
     # Create the client socket
     client_context = zmq.Context()
     client_sock = client_context.socket(zmq.REQ)
-    assert(action in ('locate', 'check_client', 'register_client', 'enqueue_message'))
+    assert(action in (
+        'locate',
+        'check_client',
+        'register_client',
+        'enqueue_message'
+    ))
     client_sock.connect("tcp://%s:%d" % (tracker_ip, tracker_port))
     if action in ('check_client', 'register_client'):
         client_sock.send_json(
@@ -102,7 +107,12 @@ class ClientInformationTracker:
         @bootstrap_chord_peers: List of ip-port tuples of well known chord\
              nodes.
         '''
-        self.chord_peers = [RemoteNodeReference(node[0], node[1]) for node in bootstrap_chord_peers]   # [(ip, port)]
+        self.chord_peers = [
+            RemoteNodeReference(
+                node[0],
+                node[1]
+            ) for node in bootstrap_chord_peers
+        ]   # [(ip, port)]
         self.ip_address = address
         self.port = port
 
@@ -208,7 +218,12 @@ class ClientInformationTracker:
         user_id = sha1(bytes("%s" % client_id, 'ascii'))
 
         chord_peer = self.__find_alive_chord()
-        request("chord://%s:%d" % chord_peer, 'enqueue_message', user_id, message)
+        request(
+            "chord://%s:%d" % chord_peer,
+            'enqueue_message',
+            user_id,
+            message
+        )
         return True
 
     def __dispatch_object_method(self, method, *args):
@@ -232,7 +247,11 @@ class ClientInformationTracker:
             client_id = req['id']
             args = [client_id]
 
-            if action in ('check_client', 'register_client', 'enqueue_message'):
+            if action in (
+                'check_client',
+                'register_client',
+                'enqueue_message'
+            ):
                 cliend_address = req['ip']
                 client_port = req['port']
                 args += [cliend_address, client_port]

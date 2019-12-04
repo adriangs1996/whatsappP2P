@@ -107,12 +107,16 @@ class RemoteNodeReference(object):
 
     def __str__(self):
         return f"<{self.ip}:{self.port}>"
-    
+
     def __repr__(self):
         return str(self)
 
     def id(self, offset=0):
-        digest = int(sha1(bytes("%s:%d" % (self.ip, self.port), 'ascii')).hexdigest(), 16)
+        digest = int(
+            sha1(
+                bytes("%s:%d" % (self.ip, self.port), 'ascii')
+                ).hexdigest(),
+            16)
         return (digest + offset) % 2**(KEY_SIZE)
 
     def open_connection(self):
@@ -186,45 +190,45 @@ class RemoteNodeReference(object):
         remote_node_reference = RemoteNodeReference(node.ip, node.port)
         remote_node_reference.lock = None
         self.send(['notify', remote_node_reference])
-    
+
     @safe_connection_required
     def simple_put(self, key, val):
         self.send(["simple_put", key, val])
-    
+
     @safe_connection_required
     def put(self, key, val):
         self.send(["put", key, val])
-    
+
     @safe_connection_required
     def get(self, key):
         self.send(["get", key])
         response = loads(self.recv())
         return response
-    
+
     @safe_connection_required
     def enqueue_message(self, key, msg):
         self.send(["enqueue_message", key, msg])
-    
+
     @safe_connection_required
     def simple_enqueue(self, key, msg):
         self.send(["simple_enqueue", key, msg])
-    
+
     @safe_connection_required
     def simple_dequeue(self, key):
         self.send(["simple_dequeue", key])
-        
+
     @safe_connection_required
     def dequeue_messages(self, key):
         self.send(["dequeue_messages", key])
         msg_list = loads(self.recv())
         return msg_list
-    
+
     @safe_connection_required
     def get_keys(self, key):
         self.send(["get_keys", key])
         key_val, key_msg = loads(self.recv())
         return key_val, key_msg
-    
+
     @safe_connection_required
     def remove_key(self, key):
         self.send(["remove_key", key])
@@ -253,10 +257,16 @@ class Node:
 
     def join(self, dest_host):
         if dest_host:
-            remote_node_reference = RemoteNodeReference(dest_host[0], dest_host[1])
-            succ = self.fingers[0] = remote_node_reference.find_succesor(self.id())
+            remote_node_reference = RemoteNodeReference(
+                dest_host[0],
+                dest_host[1]
+            )
+            succ = self.fingers[0] = remote_node_reference.find_succesor(
+                self.id()
+            )
             # Negotiate with succesor the keys
-            key_val, key_msg = succ.get_keys(self.id())  # keys <= self.identifier
+            # keys <= self.identifier
+            key_val, key_msg = succ.get_keys(self.id())
             for k, v in key_val:
                 self.simple_put(k, v)
             for k, msg in key_msg:
@@ -289,7 +299,11 @@ class Node:
         self.messages.pop(key, None)
 
     def id(self, offset=0):
-        digest = int(sha1(bytes("%s:%d" % (self.ip, self.port), 'ascii')).hexdigest(), 16)
+        digest = int(
+            sha1(
+                bytes("%s:%d" % (self.ip, self.port), 'ascii')
+                ).hexdigest(),
+            16)
         return (digest + offset) % 2**(KEY_SIZE)
 
     def ping(self):
@@ -312,7 +326,8 @@ class Node:
             self.fingers[0] = succesor
 
         pred = succesor.predecessor()
-        if pred is not None and between(pred.id(), self.id(1), succesor.id(1)) and self.id(1) != succesor.id() and pred.ping():
+        if pred is not None and between(pred.id(), self.id(1), succesor.id(1))\
+                and self.id(1) != succesor.id() and pred.ping():
             self.fingers[0] = pred
 
         self.succesor().notify(self)
@@ -322,11 +337,19 @@ class Node:
         return self._predecessor
 
     def notify(self, remote_node_reference):
-        if self.predecessor() is None or between(remote_node_reference.id(), self.predecessor().id(1), self.id(1)) or not self.predecessor().ping():
+        if self.predecessor() is None or between(
+            remote_node_reference.id(),
+            self.predecessor().id(1),
+            self.id(1)
+        ) or not self.predecessor().ping():
             self._predecessor = remote_node_reference
 
     def find_successor(self, key):
-        if self.predecessor() and between(key, self.predecessor().id(1), self.id(1)):
+        if self.predecessor() and between(
+            key,
+            self.predecessor().id(1),
+            self.id(1)
+        ):
             return self
         node = self.find_predecessor(key)
         return node.succesor()
@@ -342,7 +365,11 @@ class Node:
 
     def closest_preceding_node(self, key):
         for node in reversed(self.succesors + self.fingers):
-            if node is not None and between(node.id(), self.id(1), key) and node.ping():
+            if node is not None and between(
+                node.id(),
+                self.id(1),
+                key
+            ) and node.ping():
                 return node
         return self
 
@@ -364,7 +391,9 @@ class Node:
             self.succesors = successors
 
     def get_succesors(self):
-        return [(node.ip, node.port) for node in self.succesors[:MAX_SUCCESORS - 1]]
+        return [
+            (node.ip, node.port) for node in self.succesors[:MAX_SUCCESORS - 1]
+        ]
 
     def recv(self, sock):
         data = b''
@@ -403,7 +432,9 @@ class Node:
                 request = request[1:]
                 # Valid command
                 if hasattr(self, command) or command in self.callbacks.keys():
-                    if command == "notify":  # This is needed because cloudpickle wont serialize lock objects
+                    # This is needed because cloudpickle wont serialize lock\
+                    #  objects
+                    if command == "notify":
                         request[0].lock = threading.BoundedSemaphore()
                     response = self.__dispatch_rpc(command, *request)
 
@@ -417,7 +448,9 @@ class Node:
     def start_service(self):
         stabilize_daemon = threading.Thread(target=self.stabilize)
         fix_fingers_daemon = threading.Thread(target=self.fix_fingers)
-        update_succesors_daemon = threading.Thread(target=self.update_succesors)
+        update_succesors_daemon = threading.Thread(
+            target=self.update_succesors
+        )
         rpc_daemon = threading.Thread(target=self.serve_rpc_requests)
 
         rpc_daemon.start()

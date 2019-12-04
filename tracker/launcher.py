@@ -26,5 +26,6 @@ def main():
 
     ClientInformationTracker(ip, port, bootstrap_nodes)
 
+
 if __name__ == '__main__':
     main()
