@@ -156,10 +156,16 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
 
     def button_del_contact_clicked(self):
         cont = self.listWidget_contacts.currentItem()
-        if cont:
+        try:
             self.client.delete_contact(cont.text())
+        except KeyError:
+            print('contact does not exist')
+            return
+        try:
             self.listWidget_contacts.removeItemWidget(cont)
             self.listWidget_contacts.repaint()
+        except KeyError:
+            print('item does not exist')
 
     def button_search_contact_clicked(self):
         result = self.client.search_contact(self.lineEdit.text())
@@ -218,15 +224,15 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
 
 
     def handle_incomming_messages(self):
-        queue = self.client.incomming_queue
-        print(queue)
+        #queue = self.client.incomming_queue
+        #print(queue)
         while True:
             active_contact = None
             if self.listWidget_contacts.currentItem():
                 active_contact = self.listWidget_contacts.currentItem().contact_name
-            while not queue.isEmpty:
-                print('queue not empty')
-                message = queue.pop() 
+            if not self.client.incomming_queue.isEmpty:
+                print('incomming queue not empty')
+                message = self.client.incomming_queue.pop() 
                 sender = message.sender
                 self.client.__log_message__(sender, message)
                 print('sender: {0}\nactive contact: {1}'.format(sender, active_contact))
@@ -237,9 +243,9 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
                     print('sender is not active contact')
                     # self.client.__log_message__(sender, message)
             
-            pending_queue = self.client.pending_users
-            while not pending_queue.isEmpty:
-                new_usr = pending_queue.pop()
+            #pending_queue = self.client.pending_users
+            if not self.client.pending_users.isEmpty:
+                new_usr = self.client.pending_users.pop()
                 print('new user incoming: {0}'.format(new_usr))
                 item = CustomListItem(new_usr, {})
                 item.setText(new_usr)
