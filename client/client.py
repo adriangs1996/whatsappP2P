@@ -5,6 +5,7 @@ import socket
 from myqueue import Queue as myQueue
 from threading import Thread
 from random import randint
+from pending_action import PendingAction
 loads = cloudpickle.loads
 dumps = cloudpickle.dumps
 
@@ -24,7 +25,7 @@ class Client:
         except:
             self.ip = socket.gethostbyname(socket.gethostname())           
             self.port = randint(3001, 9000)
-            self.contacts_info = {}          # {contact_name : {'addr': address (*tuple ip,port*), 'online' : bool, 'unread': int, 'conversation': myQueue(messages)}}
+            self.contacts_info = {}          # {contact_name : {'addr': address (*tuple ip,port*), 'online' : bool, 'conversation': myQueue(messages)}}
             #self.chats = {}             # {contact_name : list with the messages in the conversation}
             self.outgoing_queue = myQueue(capacity= 50, auto_growth= True, items=[])    # myQueue with pending messages
             #self.online_contacts = {}
@@ -32,6 +33,7 @@ class Client:
             self.active_user = None
             self.incomming_queue = myQueue(capacity=50, auto_growth= True, items=[])
             self.pending_users = myQueue(capacity=50, auto_growth= True, items=[])
+            self.pending_actions = myQueue(capacity=50, auto_growth= True, items=[])
 
         #self.server_sock = self.__open_socket__()
         #self.is_sock_open = True
@@ -52,7 +54,7 @@ class Client:
         self.incomming_thread.setDaemon(True)
         self.incomming_thread.start()
 
-        self.pending_thread = Thread(target= self.__pending_loop__)
+        self.pending_thread = Thread(target= self.process_pending_messages)
         self.pending_thread.setDaemon(True)
         self.pending_thread.start()
 
@@ -79,12 +81,12 @@ class Client:
                     if messg == 'ping':
                         self.incoming_sock.send_string('online')
                 else:
-                    sender = messg.sender
-                    if sender == self.active_user:
-                        self.incomming_queue.enqueue(messg)
-                        print('incomming message enqueued')
-                    else:
-                        self.__log_message__(sender, messg)                
+                    # sender = messg.sender
+                    # if sender == self.active_user:
+                    #     self.incomming_queue.enqueue(messg)
+                    #     print('incomming message enqueued')
+                    # else:
+                    self.__log_message__(messg.sender, messg)                
                     self.incoming_sock.send_pyobj({'response': True})
 
 
@@ -185,11 +187,6 @@ class Client:
             if self.outgoing_sock.poll(timeout= tout, flags= zmq.POLLIN):
                 break
             print('out of poll')
-            # self.outgoing_sock.setsockopt(zmq.LINGER, 0)
-            # self.outgoing_sock.close()
-            # self.outgoing_sock = self.context.socket(zmq.REQ)
-            # self.outgoing_sock.connect(f'tcp://{target_address}')
-            
             tries -= 1
             tout *= 2
         if not tries:
@@ -202,32 +199,39 @@ class Client:
         print(reply['response'])
         return True
 
-    def __pending_loop__(self):
+    def process_pending_messages(self):
         while True:
-            self.process_pending_messages()
-
-    def process_pending_messages(self):                     #// done
-        #for contact in self.outgoing_queue.keys():
-        # print('process peding running')
-        queue = self.outgoing_queue
-        # print('count queue: {0}'.format(queue.count))
-        if not queue.isEmpty:
-            message = queue.peek()
-            address = self.get_peer_address(message.receiver) 
-            print('attempting to resend message')               
-            if not self.__send_pending_message__(address, message):
-                if self.send_message_to_server_queue(message):
-                    #print('message sent to server')
-                    self.__log_message__(message.receiver, message)
-                    queue.pop()
-                else:
-                    return
-                #continue  
-                # print('message not sent from process pending')
-                # pass             
-            else:
+            if self.outgoing_queue.isEmpty:
+                continue
+            message = self.outgoing_queue.pop()
+            address = self.get_peer_address(message.receiver)
+            if self.__send_pending_message__(address, message):
                 self.__log_message__(message.receiver, message)
-                queue.pop()
+                continue
+            elif self.send_message_to_server_queue(message):
+                self.__log_message__(message.receiver, message)
+                continue
+            else:
+                self.outgoing_queue.enqueue(message)
+                continue
+
+
+    def process_pending_messages_OLD(self):
+        while True:
+            if not self.outgoing_queue.isEmpty:
+                message = self.outgoing_queue.peek()
+                address = self.get_peer_address(message.receiver) 
+                print('attempting to resend message')               
+                if not self.__send_pending_message__(address, message):
+                    if self.send_message_to_server_queue(message):
+                        print('message sent to server')
+                    else:
+                        print('message not sent from process pending')
+                        continue             
+                else:
+                    print('message sent to client')
+                self.__log_message__(message.receiver, message)
+                self.outgoing_queue.pop()
 
     def __send_pending_message__(self, target_address, message):
         reply = None
@@ -246,26 +250,22 @@ class Client:
         while tries:
             if self.pending_sock.poll(timeout= tout, flags= zmq.POLLIN):
                 break
-            print('out of poll')
-            # self.pending_sock.setsockopt(zmq.LINGER, 0)
-            # self.pending_sock.close()
-            # self.pending_sock = self.context.socket(zmq.REQ)
-            # self.pending_sock.connect(f'tcp://{target_address}')
-            
+            print('out of poll')            
             tries -= 1
             tout *= 2
         if not tries:
             self.pending_sock.setsockopt(zmq.LINGER, 0)
             self.pending_sock.close()
-            print('socket closed')
+            print('message not received, socket closed')
             return False
 
         reply = self.pending_sock.recv_json()
-        print(reply['response'])
+        print('message received')
         return True
     
     def send_message_to_server_queue(self, message): 
-        print('attempting to send messsage to server')       #// done
+        print('attempting to send messsage to server')  
+        reply = None     #// done
         for t_ip,t_port in self.servers:
             try:
                 reply = request_tracker_action2(t_ip, t_port, 'enqueue_message', ip= self.ip, port= self.port, message= message)
@@ -274,8 +274,9 @@ class Client:
                     return True
             except NoResponseException:
                 print('no response in send to queue')
-                return False
-                    
+                continue
+        if not reply:
+            return False
 
     def __open_socket__(self, sock_type= zmq.REQ):          #// done
         '''
@@ -296,7 +297,6 @@ class Client:
     def add_contact(self, contact_name):                    #// done
         self.contacts_info[contact_name] = {}
         self.update_contact_info(contact_name)
-        self.contacts_info[contact_name]['unread'] = 0
         temp = myQueue(capacity=50, auto_growth=False, items=[])
         self.contacts_info[contact_name]['conversation'] = temp
         return self.contacts_info[contact_name]
@@ -310,8 +310,7 @@ class Client:
                     return
             except NoResponseException:
                 continue   
-       
-    
+           
     def get_peer_address(self, peer_name):                  #//auxiliary method, done
         r_ip,r_port = self.contacts_info[peer_name]['addr']
         return f'{r_ip}:{r_port}'
@@ -322,12 +321,7 @@ class Client:
             self.outgoing_queue = myQueue(capacity= 50, auto_growth= True,items= [])
         self.outgoing_queue.enqueue(message)
         print('message enqueued')
-        print(self.outgoing_queue.count)
-        # if target_client not in temp_queue.keys():
-            # temp = myQueue(capacity= 50, auto_growth= True, items= [])
-            # temp_queue[target_client] = temp
-        # temp_queue[target_client].enqueue(message)        
-
+        print(self.outgoing_queue.count)       
 
     def __log_message__(self, target_client, message):  
         queue_temp = None
@@ -336,11 +330,12 @@ class Client:
         except KeyError:
             print('key error logging message')
             self.add_contact(target_client)
-            self.pending_users.enqueue(target_client)
+            # self.pending_users.enqueue(target_client)
         if queue_temp == None:
             queue_temp = myQueue(capacity=50, auto_growth=False, items=[])
             self.contacts_info[target_client]['conversation'] = queue_temp
         queue_temp.smart_enqueue(message)
+        self.pending_actions.enqueue(PendingAction(message, self.username))
         print('message logged')
 
     def send_adj_client(self, target_client, target_file):  #todo
@@ -468,8 +463,10 @@ class Client:
     def exit(self):
         self.save_client_state()
         self.incomming_thread.join()
+        self.pending_thread.join()
         self.incoming_sock.close()
         self.outgoing_sock.close() 
+        self.pending_sock.close()
         self.context.term()       
 
     def __read_config__(self):

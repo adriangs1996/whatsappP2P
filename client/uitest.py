@@ -8,7 +8,20 @@
 from regpopup import Ui_Dialog
 from client import Client, Message
 from PyQt5 import QtCore, QtGui, QtWidgets
-from threading import Thread
+from threading import Thread as myThread
+
+class Worker(QtCore.QObject):
+    new_action = QtCore.pyqtSignal()
+
+    def __init__(self, client):
+        QtCore.QObject.__init__(self)
+        self.client = client
+
+    @QtCore.pyqtSlot()
+    def check_queue(self):
+        while True:
+            if not self.client.pending_actions.isEmpty:
+                self.new_action.emit()
 
 
 LEFTALGN = 0x001
@@ -21,9 +34,21 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
         self.check_regitration()
         self.setupUi()
 
-        incomm_thread = Thread(target= self.handle_incomming_messages, name= 'handle_incomming_messages in uitest')
-        incomm_thread.setDaemon(True)
-        incomm_thread.start()
+        self.worker = Worker(self.client)
+        self.thread = QtCore.QThread()
+
+        #Using QThread
+        self.worker.new_action.connect(self.on_new_action)
+        self.worker.moveToThread(self.thread)
+
+        self.thread.started.connect(self.worker.check_queue)
+        self.thread.start()
+        
+
+        #Using threading
+        # incomm_thread = myThread(target= self.handle_pending_actions, name= 'handle_pending_actions in uitest')
+        # incomm_thread.setDaemon(True)
+        # incomm_thread.start()
 
     def closeEvent(self, event):
         self.client.save_client_state()
@@ -119,10 +144,28 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
 
         self.pushButton_add_contact.clicked.connect(self.button_add_contact_clicked)
         self.pushButton_del_contact.clicked.connect(self.button_del_contact_clicked)
+        # self.pushButton_del_contact.clicked.connect(self.test)
         self.pushButton_search_contact.clicked.connect(self.button_search_contact_clicked)
         self.pushButton_send.clicked.connect(self.button_send_clicked)
         self.pushButton_register.clicked.connect(self.check_regitration)
         self.listWidget_contacts.clicked.connect(self.contact_list_item_selected)
+
+    def test(self):
+        if not self.client.pending_actions.isEmpty:
+            new_act = self.client.pending_actions.pop()
+            print('incomming queue not empty:', str(new_act))
+            if new_act.sender == self.client.username:
+                if new_act.receiver == self.client.active_user:
+                    self.paint_message(self.client.username, new_act.message_text, RIGHTALGN)
+            else:
+                if new_act.sender == self.client.active_user:
+                    self.paint_message(new_act.sender, new_act.message_text, LEFTALGN)
+                else:
+                    if not self.listWidget_contacts.findItems(new_act.sender, QtCore.Qt.MatchExactly):
+                        item = CustomListItem(new_act.sender, None)
+                        item.setText(new_act.sender)
+                        self.listWidget_contacts.addItem(item)
+                    self.add_unread_counter()
 
     def retranslateUi(self, MainWindow):
         _translate = QtCore.QCoreApplication.translate
@@ -143,6 +186,8 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
             self.listWidget_contacts.addItem(item)
 
     def button_add_contact_clicked(self):
+        if not self.listWidget_2.currentItem():
+            return
         cont = self.listWidget_2.currentItem()
         if cont.contact_name in self.client.contacts_info:
             item = CustomListItem(cont.text(), self.client.contacts_info[cont.contact_name])
@@ -155,6 +200,8 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
             self.listWidget_contacts.addItem(item) 
 
     def button_del_contact_clicked(self):
+        if not self.listWidget_contacts.currentItem():
+            return
         cont = self.listWidget_contacts.currentItem()
         try:
             self.client.delete_contact(cont.text())
@@ -163,7 +210,8 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
             return
         try:
             self.listWidget_contacts.removeItemWidget(cont)
-            self.listWidget_contacts.repaint()
+            self.listWidget_contacts.setUpdatesEnabled(True)
+            self.listWidget_contacts.update()
         except KeyError:
             print('item does not exist')
 
@@ -175,8 +223,6 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
             item = CustomListItem(self.lineEdit.text(), result)
             item.setText(item.contact_name)
             self.listWidget_2.addItem(item)
-
-            
             
     def contact_list_item_selected(self):
         item = self.listWidget_contacts.currentItem().contact_name
@@ -186,10 +232,8 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
         #print(item.contact_data['conversation'])
         self.show_conversation(self.client.contacts_info[item]['conversation'])
  
-
-
     def button_send_clicked(self):
-        text = self.textEdit.toPlainText()
+        text = self.textEdit.toPlainText()        
         contact = self.listWidget_contacts.currentItem()
         if not contact:
             contact = self.listWidget_2.currentItem()
@@ -197,22 +241,22 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
                 return
             else:
                 contact_name = self.listWidget_2.currentItem().contact_name
+                self.client.add_contact(contact_name)
+                item = CustomListItem(contact_name, None)
+                item.setText(item.contact_name)
+                self.listWidget_contacts.addItem(item) 
         else:
             contact_name = self.listWidget_contacts.currentItem().contact_name
 
         target = self.client.contacts_info[contact_name]
         if self.client.send_message_client(contact_name, text):
-            self.paint_message(self.client.username, text, RIGHTALGN)
             messg_list = target['conversation']             
             if messg_list.count < self.conversList.count():
                 self.conversList.takeItem(0)
         
-        
     def check_regitration(self):
         if not self.client.registered:
             self.dialog.show()
-        
-        
         
     def show_conversation(self, messg_list):
         self.conversList.clear()
@@ -221,7 +265,43 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
         for mesg in messg_list:
             self.paint_message(mesg.sender, mesg.text, LEFTALGN + (mesg.sender == self.client.username))
 
+    def on_new_action(self):
+        if not self.client.pending_actions.isEmpty:
+            new_act = self.client.pending_actions.pop()
+            print('incomming queue not empty:', str(new_act))
+            if new_act.sender == self.client.username:
+                if new_act.receiver == self.client.active_user:
+                    self.paint_message(self.client.username, new_act.message_text, RIGHTALGN)
+            else:
+                if new_act.sender == self.client.active_user:
+                    self.paint_message(new_act.sender, new_act.message_text, LEFTALGN)
+                else:
+                    if not self.listWidget_contacts.findItems(new_act.sender, QtCore.Qt.MatchExactly):
+                        item = CustomListItem(new_act.sender, None)
+                        item.setText(new_act.sender)
+                        self.listWidget_contacts.addItem(item)
+                    self.add_unread_counter()
 
+    def handle_pending_actions(self):
+        while True:
+            if not self.client.pending_actions.isEmpty:
+                new_act = self.client.pending_actions.pop()
+                print('incomming queue not empty:', str(new_act))
+                if new_act.sender == self.client.username:
+                    if new_act.receiver == self.client.active_user:
+                        self.paint_message(self.client.username, new_act.message_text, RIGHTALGN)
+                else:
+                    if new_act.sender == self.client.active_user:
+                        self.paint_message(new_act.sender, new_act.message_text, LEFTALGN)
+                    else:
+                        if not self.listWidget_contacts.findItems(new_act.sender, QtCore.Qt.MatchExactly):
+                            item = CustomListItem(new_act.sender, None)
+                            item.setText(new_act.sender)
+                            self.listWidget_contacts.addItem(item)
+                        self.add_unread_counter()
+
+    def add_unread_counter(self):
+        pass
 
     def handle_incomming_messages(self):
         #queue = self.client.incomming_queue
@@ -249,17 +329,13 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
                 print('new user incoming: {0}'.format(new_usr))
                 item = CustomListItem(new_usr, {})
                 item.setText(new_usr)
-                self.listWidget_contacts.addItem(item)
-            
             
     def paint_message(self, sender, message_text, alignment):
         item = CustomListItem(sender, message_text)
-        item.setText(f'{item.contact_name}\n {item.contact_data}')
-        self.conversList.addItem(item)
+        item.setText(f'{item.contact_name}\n{item.contact_data}')
         item.setTextAlignment(alignment)
-        self.conversList.repaint() 
-
-                    
+        self.conversList.addItem(item)
+        # self.conversList.repaint() 
 
 
 class CustomConversation(QtWidgets.QWidget):
