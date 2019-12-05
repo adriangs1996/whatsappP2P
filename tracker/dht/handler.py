@@ -1,4 +1,4 @@
-import chord
+import chord as chord
 import argparse
 import re
 

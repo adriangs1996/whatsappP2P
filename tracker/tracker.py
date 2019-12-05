@@ -71,7 +71,7 @@ def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
     # clients should test for a server response to know whether
     # it's active, or is down.
     tries = 8
-    timeout = 1000
+    timeout = 10
     while tries:
         if client_sock.poll(timeout=timeout, flags=zmq.POLLIN):
             break
@@ -82,7 +82,9 @@ def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
         client_sock.close()
         raise NoResponseException
 
-    response = client_sock.recv_json()['response']
+    response = client_sock.recv_pyobj()['response']
+    print(response)
+
     if isinstance(response, list):
         rep = []
         for message in response:
@@ -90,6 +92,7 @@ def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
         response = rep
 
     client_sock.close()
+    print(response)
     return response
 
 
@@ -156,7 +159,7 @@ class ClientInformationTracker:
         if not isinstance(client_id, str) or not len(client_id) <= 20:
             return False
 
-        client_key = sha1(bytes("%s" % client_id, 'ascii'))
+        client_key = int(sha1(bytes("%s" % client_id, 'ascii')).hexdigest(), 16)
 
         logging.debug(
             "Verifiying if client %s is already register in DHT",
@@ -186,8 +189,8 @@ class ClientInformationTracker:
         logging.debug("Client already registered")
         return False
 
-    def __serve_client_info(self, client_id):
-        client_key = sha1(bytes("%s" % client_id, 'ascii'))
+    def serve_client_info(self, client_id):
+        client_key = int(sha1(bytes("%s" % client_id, 'ascii')).hexdigest(), 16)
 
         logging.debug("Requesting client %x address", client_key)
 
@@ -257,10 +260,10 @@ class ClientInformationTracker:
                 args += [cliend_address, client_port]
 
             elif action == 'locate':
-                action = '__serve_client_info'
+                action = 'serve_client_info'
 
             if action == "enqueue_message":
                 args += [req['marshalled']]
 
             result = self.__dispatch_object_method(action, *args)
-            server_sock.send_json({'response': result})
+            server_sock.send_pyobj({'response': result})

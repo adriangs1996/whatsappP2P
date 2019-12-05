@@ -1,35 +1,25 @@
 import zmq
 import cloudpickle
+import json
+import socket
 from myqueue import Queue as myQueue
 from threading import Thread
+from random import randint
+loads = cloudpickle.loads
 
-class Client:
-    '''
-    Clase base para implementar los clientes de ScrollMAT.\
-    Cada cliente tiene acceso a un conjunto de funciones\
-    elementales como son, entrar a un servidor de ScrollMAT,\
-    registrarse en ScrollMAT, enviar un mensaje a otro cliente, \
-    enviar un mensaje a un grupo, enviar un archivo a otro cliente,\
-    publicar un archivo en un grupo, etc. Incluso, este cliente implementara \
-    las funcionalidades elementales para poder enviar los mensajes cifrados, o sea \
-    cifrado y descifrado de mensajes y archivos. \
-    Para instanciar un cliente, es necesario introducir la direccion de un servidor de \
-    ScrollMAT conocido, y pasar por todo el mecanismo de registro, login , etc, o simplemente \
-    se puede cargar un cliente ya guardado utilizando la funcionalidad estatica *restore_client()*.
-    '''
+class Client:  
 
-    def __init__(self, *args, **kwargs):  
+    def __init__(self, *args, **kwargs):   #todo implement get server addrs from config file #// done
         # .*args = server_addr, self.ip, self.port si se esta instanciando un cliente nuevo, 
         # #si no *args = client_identifier para restaurarlo'
         # if len(args) <= 2:
         #     Client.restore_client(args[1])
         # else:
         try:
-            Client.restore_client(args[1])
+            Client.restore_client(self)
         except:
-            self.servers = []      # trackers addresses, tuple (ip,port)
-            self.ip = args[1]           
-            self.port = args[2]
+            self.ip = socket.gethostbyname(socket.gethostname())           
+            self.port = randint(3001, 9000)
             self.contacts_info = {}          # {contact_name : {'addr': address (*tuple ip,port*), 'online' : bool,  'conversation': myQueue(messages)}}
             #self.chats = {}             # {contact_name : list with the messages in the conversation}
             self.outgoing_queue = {}    # {contact_name : queue with pending messages}
@@ -39,22 +29,22 @@ class Client:
         #self.server_sock = self.__open_socket__()
         #self.is_sock_open = True
         #self.server_sock.connect(f'http://{self.server_addr}')
-            
+        self.servers = self.__read_config__()   # trackers addresses, list of tuple (ip,port) (str,int)  
     
         if self.registered:
             self.loggin()
 
         self.context = zmq.Context()
 
-        self.__start_client__(ip, port)
+        self.__start_client__()
 
         self.process_pending_messages()
         
-        incomming_thread = Thread(target= self.__handle_incomming__)
-        incomming_thread.setDaemon(True)
-        incomming_thread.start()
+        self.incomming_thread = Thread(target= self.__handle_incomming__)
+        self.incomming_thread.setDaemon(True)
+        self.incomming_thread.start()
 
-    def __start_client__(self, ip, port):
+    def __start_client__(self):
         #this is to start the client sockets
         #context = zmq.Context()             #! this might be troublesome, in case of error check if this is the cause, try to solve it with global context
         self.incoming_sock = self.context.socket(zmq.REP)
@@ -77,7 +67,7 @@ class Client:
                 self.incoming_sock.send_json({'response': True})
 
 
-    def register(self, username, password, phone) -> bool:          #// done
+    def register(self, username) -> bool:          #// done
     
         '''
         Este procedimiento se reserva para la creacion de clientes que no esten presentes en el\
@@ -89,17 +79,23 @@ class Client:
         for t_ip,t_port in self.servers:
             try:
                 reply = request_tracker_action(t_ip, t_port, 'register_client', user= username, ip= self.ip, port= self.port)
+                print('sent request from client')
+                print(reply)
                 if reply:
                     self.registered = True
                     self.username = username
-                    break            
+                    break     
             except:
                 continue
+
+            if not reply:
+                print('not reply')
+                raise Exception
 
         return self.registered
 
 
-    def loggin(self):"Ok"                                   #// done
+    def loggin(self):                                   #// done
         '''
         Una vez registrado el cliente, con cada inicio de sesion habra que logearse en el sistema.\
         Para ello se utiliza el identificador del cliente y se le proporciona el usuario y el passw\
@@ -111,6 +107,9 @@ class Client:
                 reply = request_tracker_action(t_ip, t_port, 'check_client', user= self.username, ip= self.ip, port= self.port)
                 for item in reply:
                     self.__log_message__(item.sender, item)
+            except:
+                continue
+            
 
 
     def send_message_client(self, target_client, message) -> bool:          #//done, i think
@@ -128,13 +127,10 @@ class Client:
     def __send_message__(self, target_address, message) -> bool:   # target_address is a string of the form 'ip_address:port' #//done
         reply = None
         if self.outgoing_sock.closed:
-            #context = zmq.Context()
             self.outgoing_sock = self.context.socket(zmq.REQ)
         try:
             self.outgoing_sock.connect(f'tcp://{target_address}')
-        except zmq.ZMQError:
-            #self.outgoing_sock = self.__open_socket__()
-            #self.outgoing_sock.connect(f'tcp://{target_address}')
+        except:
             return False
         
         self.outgoing_sock.send_pyobj(message)
@@ -154,9 +150,9 @@ class Client:
         return reply['response']
        
     def process_pending_messages(self):                     #// done
-        for contact in outgoing_queue.keys():
+        for contact in self.outgoing_queue.keys():
             address = self.get_peer_address(contact)
-            queue = outgoing_queue[contact]
+            queue = self.outgoing_queue[contact]
             while not queue.isEmpty():
                 message = queue.peek()
                 if not self.__send_message__(address, message):
@@ -169,7 +165,7 @@ class Client:
 
     
     def send_message_to_server_queue(self, message):        #// done
-        for t_ip,t_port in self.servers
+        for t_ip,t_port in self.servers:
             try:
                 reply = request_tracker_action(t_ip, t_port, 'enqueue_message', message)
                 if reply:
@@ -197,6 +193,7 @@ class Client:
     def add_contact(self, contact_name):                    #// done
         self.contacts_info[contact_name] = {}
         self.update_contact_info(contact_name)
+        return self.contacts_info[contact_name]
 
     def update_contact_info(self, contact_name):            #// done
         for (t_ip, t_port) in self.servers:
@@ -263,18 +260,19 @@ class Client:
 
         d={}
         for key in self.__dict__.keys():
-            if type(self.__dict__[key]) is not zmq.Socket:                
+            t = type(self.__dict__[key])
+            if t is not zmq.Socket and t is not zmq.Context:                
                 d[key] = self.__dict__[key]
-        filestream = open(f'wsp_client_{self.identifier}', mode ='wb')
+        filestream = open(f'wsp_client.bin', mode ='wb')
         cloudpickle.dump(d, filestream)
         filestream.close()
 
     @staticmethod
-    def restore_client(identifier):                         #// done, i think
+    def restore_client(self):                         #// done, i think
         '''
         Carga el estado de un cliente guardado y devuelve una instancia de Client listo para usar.
         '''
-        filestream = open(f'wsp_client_{self.identifier}', mode= 'rb')
+        filestream = open(f'wsp_client.bin', mode= 'rb')
         client_info = cloudpickle.load(filestream)
         filestream.close()
 
@@ -322,18 +320,29 @@ class Client:
         for t_ip,t_port in self.servers:
             try:
                 reply = request_tracker_action(t_ip, t_port, 'locate', user= contact_name)
-            except:
+                print(reply)
+            except NoResponseException:
+                print('entered exception')
                 return None
-            else:
-                return reply
+            
+            return reply
 
-    def delete_contact(self. contact_name):
+    def delete_contact(self, contact_name):
         self.contacts_info.pop(contact_name)
 
     def exit(self):
         self.save_client_state()
+        self.incomming_thread.join()
         self.incoming_sock.close()
-        self.outgoing_sock.close()
+        self.outgoing_sock.close()        
+
+    def __read_config__(self):
+        fd = open('config-file.conf', 'r')
+        config = json.load(fd)
+        servers = [(x,y) for x,y in config]
+        return servers
+
+
         
         
         
@@ -535,7 +544,7 @@ def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
     # clients should test for a server response to know whether
     # it's active, or is down.
     tries = 8
-    timeout = 1000
+    timeout = 10
     while tries:
         if client_sock.poll(timeout=timeout, flags=zmq.POLLIN):
             break
@@ -544,9 +553,9 @@ def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
     # No server response
     if not tries:
         client_sock.close()
-        raise NoResponseException
+        raise NoResponseException()
 
-    response = client_sock.recv_json()['response']
+    response = client_sock.recv_pyobj()['response']
     if isinstance(response, list):
         rep = []
         for message in response:
@@ -555,3 +564,6 @@ def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
 
     client_sock.close()
     return response
+    
+class NoResponseException(Exception):
+    pass

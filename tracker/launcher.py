@@ -23,6 +23,7 @@ def main():
         peer = peer.split(":")
         nodes.append((peer[0], int(peer[1])))
     bootstrap_nodes = nodes
+    print(bootstrap_nodes)
 
     ClientInformationTracker(ip, port, bootstrap_nodes)
 
