@@ -81,11 +81,6 @@ class Client:
                     if messg == 'ping':
                         self.incoming_sock.send_string('online')
                 else:
-                    # sender = messg.sender
-                    # if sender == self.active_user:
-                    #     self.incomming_queue.enqueue(messg)
-                    #     print('incomming message enqueued')
-                    # else:
                     self.__log_message__(messg.sender, messg)                
                     self.incoming_sock.send_pyobj({'response': True})
 
@@ -155,18 +150,19 @@ class Client:
         Envia un mensaje al cliente destino.
         '''
         message = Message(message_text, self.username, target_client)
+        print(target_client)
         if target_client not in self.contacts_info.keys():
             self.add_contact(target_client)
         address = self.get_peer_address(target_client)
         #self.enqueue_message(target_client, message)
-        if not self.__send_message__(address, message, flag= NOTPEND):
+        if not self.__send_message__(address, message):
             self.enqueue_message(target_client, message)
             return False
         else:
             self.__log_message__(target_client, message)
             return True
 
-    def __send_message__(self, target_address, message, flag= NOTPEND) -> bool:   # target_address is a string of the form 'ip_address:port' #//done
+    def __send_message__(self, target_address, message) -> bool:   # target_address is a string of the form 'ip_address:port' #//done
         # if not self.outgoing_queue.isEmpty and flag:
         #     return False
         
@@ -174,8 +170,11 @@ class Client:
         if self.outgoing_sock.closed:
             self.outgoing_sock = self.context.socket(zmq.REQ)
         try:
+            #self.outgoing_sock.disconnect()
             self.outgoing_sock.connect(f'tcp://{target_address}')
+            print(target_address)
         except:
+            print('returning false from exception')
             return False
         
         self.outgoing_sock.send_pyobj(message)
@@ -187,16 +186,23 @@ class Client:
             if self.outgoing_sock.poll(timeout= tout, flags= zmq.POLLIN):
                 break
             print('out of poll')
+            self.outgoing_sock.setsockopt(zmq.LINGER, 0)
+            self.outgoing_sock.close()
+            self.outgoing_sock = self.context.socket(zmq.REQ)
+            self.outgoing_sock.connect(f'tcp://{target_address}')
             tries -= 1
             tout *= 2
         if not tries:
             self.outgoing_sock.setsockopt(zmq.LINGER, 0)
             self.outgoing_sock.close()
-            print('socket closed')
+            print('socket closed due not tries, returning false')
             return False
 
         reply = self.outgoing_sock.recv_pyobj()
-        print(reply['response'])
+        self.outgoing_sock.close()
+        print('message sent to peer')
+        print(message)
+        print('returning true')
         return True
 
     def process_pending_messages(self):
@@ -250,7 +256,11 @@ class Client:
         while tries:
             if self.pending_sock.poll(timeout= tout, flags= zmq.POLLIN):
                 break
-            print('out of poll')            
+            print('out of poll')      
+            self.pending_sock.setsockopt(zmq.LINGER, 0)    
+            self.pending_sock.close()  
+            self.pending_sock = self.context.socket(zmq.REQ)
+            self.pending_sock.connect(f'tcp://{target_address}')
             tries -= 1
             tout *= 2
         if not tries:
@@ -259,7 +269,7 @@ class Client:
             print('message not received, socket closed')
             return False
 
-        reply = self.pending_sock.recv_json()
+        reply = self.pending_sock.recv_pyobj()
         print('message received')
         return True
     
