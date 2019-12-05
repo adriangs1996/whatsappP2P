@@ -26,18 +26,13 @@ class Client:
             self.ip = socket.gethostbyname(socket.gethostname())           
             self.port = randint(3001, 9000)
             self.contacts_info = {}          # {contact_name : {'addr': address (*tuple ip,port*), 'online' : bool, 'conversation': myQueue(messages)}}
-            #self.chats = {}             # {contact_name : list with the messages in the conversation}
             self.outgoing_queue = myQueue(capacity= 50, auto_growth= True, items=[])    # myQueue with pending messages
-            #self.online_contacts = {}
             self.registered = False
             self.active_user = None
             self.incomming_queue = myQueue(capacity=50, auto_growth= True, items=[])
             self.pending_users = myQueue(capacity=50, auto_growth= True, items=[])
             self.pending_actions = myQueue(capacity=50, auto_growth= True, items=[])
 
-        #self.server_sock = self.__open_socket__()
-        #self.is_sock_open = True
-        #self.server_sock.connect(f'http://{self.server_addr}')
         self.servers = self.__read_config__()   # trackers addresses, list of tuple (ip,port) (str,int)  
     
         if self.registered:
@@ -48,8 +43,6 @@ class Client:
 
         self.__start_client__()
 
-        #self.process_pending_messages()
-        
         self.incomming_thread = Thread(target= self.__handle_incomming__)
         self.incomming_thread.setDaemon(True)
         self.incomming_thread.start()
@@ -60,7 +53,6 @@ class Client:
 
     def __start_client__(self):
         #this is to start the client sockets
-        #context = zmq.Context()             
         self.incoming_sock = self.context.socket(zmq.REP)
         self.incoming_sock.bind(f'tcp://{self.ip}:{self.port}') 
         self.outgoing_sock = self.context.socket(zmq.REQ)
@@ -209,16 +201,11 @@ class Client:
         while True:
             if self.outgoing_queue.isEmpty:
                 continue
-            message = self.outgoing_queue.pop()
+            message = self.outgoing_queue.peek()
             address = self.get_peer_address(message.receiver)
-            if self.__send_pending_message__(address, message):
+            if self.__send_pending_message__(address, message) or self.send_message_to_server_queue(message):
                 self.__log_message__(message.receiver, message)
-                continue
-            elif self.send_message_to_server_queue(message):
-                self.__log_message__(message.receiver, message)
-                continue
-            else:
-                self.outgoing_queue.enqueue(message)
+                self.outgoing_queue.pop()
                 continue
 
 
