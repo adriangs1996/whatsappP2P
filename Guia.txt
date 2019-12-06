@@ -1,4 +1,0 @@
-python tracker/dht/handler.py -i localhost -p 8000
-python tracker/dht/handler.py -i localhost -p 8001 -t localhost:8000
-python tracker/dht/handler.py -i localhost -p 8002 -t localhost:8000
-python tracker/launcher.py -i 127.0.0.1 -p 8888 -t localhost:8001 localhost:8000

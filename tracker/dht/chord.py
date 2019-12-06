@@ -457,7 +457,8 @@ class Node:
 
                 client_sock.sendall(dumps(response) + b"!!")
         else:
-            logging.debug(f"Receive ping from {addr}")
+            # logging.debug(f"Receive ping from {addr}")
+            pass
         client_sock.close()
 
     def start_service(self):
@@ -473,12 +474,12 @@ class Node:
         fix_fingers_daemon.start()
         update_succesors_daemon.start()
 
-        while 1:
-            logging.debug(" ** ******* NODE STATE *********\n" +
-                          f"Succesors: {self.succesors}\n" +
-                          f"Predecesor: {self.predecessor()}\n" +
-                          f"Current Succesor: {self.succesor()}")
-            sleep(5)
+        # while 1:
+        #     logging.debug(" ** ******* NODE STATE *********\n" +
+        #                   f"Succesors: {self.succesors}\n" +
+        #                   f"Predecesor: {self.predecessor()}\n" +
+        #                   f"Current Succesor: {self.succesor()}")
+        #     sleep(5)
 
     def put(self, key, val):
         if between(key, self.predecessor().id(1), self.id()):
@@ -530,7 +531,7 @@ class Node:
     def dequeue_messages(self, key):
         # If We are responsible for key, dequeue it and return
         if between(key, self.predecessor().id(1), self.id(1)):
-            msg_list = self.messages.get(key, default=[])
+            msg_list = self.messages.get(key, [])
             self.messages[key] = []
             # Remove msgs entries in succesors
             for node in [self.fingers[0]] + self.succesors:

@@ -29,8 +29,11 @@ test:
 
 .PHONY: clean
 clean:
-	rm -r tracker/__pycache__ tracker/*.pyc;
-	rm -r tracker/dht/__pycache__ tracker/dht/*.pyc;
+	rm -r tracker/__pycache__;
+	rm -r client/__pycache__;
+	rm -r tracker/dht/__pycache__;
+	rm -r build
+	rm -r dist
 
 .PHONY: install
 install:
