@@ -145,7 +145,7 @@ class RemoteNodeReference(object):
         try:
             sock = socket.socket()
             sock.connect((self.ip, self.port))
-            sock.sendall(b"!!")
+            sock.sendall(b"pinging!!")
             sock.close()
             return True
         except socket.error:
@@ -297,6 +297,7 @@ class Node:
     def remove_key(self, key):
         self.storage.pop(key, None)
         self.messages.pop(key, None)
+        return True
 
     def id(self, offset=0):
         digest = int(
@@ -424,33 +425,40 @@ class Node:
         # Create the socket server
         server_sock = socket.socket()
         server_sock.bind((self.ip, self.port))
-        server_sock.listen(10)  # TODO: Pherhaps use a threshold here??
+        server_sock.listen(100)  # TODO: Pherhaps use a threshold here??
 
         while True:
             try:
-                client_sock, _ = server_sock.accept()
+                client_sock, addr = server_sock.accept()
+                threading.Thread(
+                    target=self.handle_client,
+                    args=(client_sock, addr)).start()
             except socket.error:
                 logging.info("Error in the RPC server socket. Continue")
                 continue
-            request = self.recv(client_sock)
-            # Ignore garbage
-            if request:
-                request = loads(request)
-                command = request[0]
-                request = request[1:]
-                # Valid command
-                if hasattr(self, command) or command in self.callbacks.keys():
-                    # This is needed because cloudpickle wont serialize lock\
-                    #  objects
-                    if command == "notify":
-                        request[0].lock = threading.BoundedSemaphore()
-                    response = self.__dispatch_rpc(command, *request)
 
-                    if isinstance(response, (RemoteNodeReference, Node)):
-                        response = (response.ip, response.port)
+    def handle_client(self, client_sock, addr):
+        request = self.recv(client_sock)
+        # Ignore garbage
+        if request != b"pinging":
+            request = loads(request)
+            command = request[0]
+            request = request[1:]
+            # Valid command
+            if hasattr(self, command) or command in self.callbacks.keys():
+                # This is needed because cloudpickle wont serialize lock\
+                #  objects
+                if command == "notify":
+                    request[0].lock = threading.BoundedSemaphore()
+                response = self.__dispatch_rpc(command, *request)
 
-                    client_sock.sendall(dumps(response) + b"!!")
-            client_sock.close()
+                if isinstance(response, (RemoteNodeReference, Node)):
+                    response = (response.ip, response.port)
+
+                client_sock.sendall(dumps(response) + b"!!")
+        else:
+            logging.debug(f"Receive ping from {addr}")
+        client_sock.close()
 
     def start_service(self):
         stabilize_daemon = threading.Thread(target=self.stabilize)
@@ -473,7 +481,7 @@ class Node:
             sleep(5)
 
     def put(self, key, val):
-        if between(key, self.predecessor().id(1), self.id(1)):
+        if between(key, self.predecessor().id(1), self.id()):
             self.storage[key] = val
             # make that our succesors update the key
             for node in [self.fingers[0]] + self.succesors:
@@ -482,13 +490,14 @@ class Node:
         else:
             node = self.find_successor(key)
             node.put(key, val)
+        return True
 
     def simple_put(self, key, val):
         self.storage[key] = val
 
     def get(self, key):
         # If we are responsible for key, return it
-        if between(key, self.predecessor().id(1), self.id(1)):
+        if between(key, self.predecessor().id(1), self.id()):
             return self.storage.get(key, False)
         else:
             # Find the node responsible for that key
@@ -510,6 +519,7 @@ class Node:
             # Search for responsible of key
             node = self.find_successor(key)
             node.enqueue_message(key, msg)
+        return True
 
     def simple_enqueue(self, key, msg):
         try:
