@@ -25,7 +25,8 @@ def main():
     bootstrap_nodes = nodes
     print(bootstrap_nodes)
 
-    ClientInformationTracker(ip, port, bootstrap_nodes)
+    trac = ClientInformationTracker(ip, port, bootstrap_nodes)
+    trac.start_services()
 
 
 if __name__ == '__main__':
