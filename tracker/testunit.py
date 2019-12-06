@@ -29,12 +29,15 @@ class DHTTest(unittest.TestCase):
             sleep(1)
         print("Stabilizing")
         sleep(5)
-        
+
         i = randrange(len(nodes))
         print("Creating Tracker")
-        trac = ClientInformationTracker('127.0.0.1', 9999, [(nodes[i].ip, nodes[i].port)])
+        trac = ClientInformationTracker(
+            '127.0.0.1',
+            9999,
+            [(nodes[i].ip, nodes[i].port)])
         trac.start_services()
-        
+
         seeds = [
             ('12.10.92.87', x) for x in set(
                 map(lambda y: randrange(8000, 9000), range(6))
@@ -66,6 +69,7 @@ class DHTTest(unittest.TestCase):
                 )
             )
             sleep(1)
+
 
 if __name__ == '__main__':
     unittest.main()

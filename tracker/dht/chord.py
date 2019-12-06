@@ -337,7 +337,8 @@ class Node:
         return self._predecessor
 
     def notify(self, remote_node_reference):
-        if self.predecessor() is None or not self.predecessor().ping() or between(
+        if self.predecessor() is None or not self.predecessor().ping()\
+            or between(
             remote_node_reference.id(),
             self.predecessor().id(1),
             self.id()
@@ -394,7 +395,8 @@ class Node:
     def get_succesors(self):
         if len(self.succesors) == MAX_SUCCESORS:
             return [
-                (node.ip, node.port) for node in self.succesors[:MAX_SUCCESORS - 1]
+                (node.ip, node.port)
+                for node in self.succesors[:MAX_SUCCESORS - 1]
             ]
         else:
             return[

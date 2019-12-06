@@ -126,7 +126,10 @@ class ClientInformationTracker:
         if not isinstance(client_id, str) or not len(client_id) <= 20:
             return False
 
-        client_key = int(sha1(bytes("%s" % client_id, 'ascii')).hexdigest(), 16)
+        client_key = int(
+            sha1(
+                bytes("%s" % client_id, 'ascii')).hexdigest(),
+            16)
 
         logging.info("verifiying if client %s is registered", client_id)
 
@@ -156,7 +159,9 @@ class ClientInformationTracker:
         if not isinstance(client_id, str) or not len(client_id) <= 20:
             return False
 
-        client_key = int(sha1(bytes("%s" % client_id, 'ascii')).hexdigest(), 16)
+        client_key = int(
+            sha1(bytes("%s" % client_id, 'ascii')).hexdigest(), 16
+            )
 
         logging.debug(
             "Verifiying if client %s is already register in DHT",
@@ -187,7 +192,9 @@ class ClientInformationTracker:
         return False
 
     def serve_client_info(self, client_id):
-        client_key = int(sha1(bytes("%s" % client_id, 'ascii')).hexdigest(), 16)
+        client_key = int(
+            sha1(bytes("%s" % client_id, 'ascii')).hexdigest(),
+            16)
 
         logging.debug("Requesting client %x address", client_key)
 
