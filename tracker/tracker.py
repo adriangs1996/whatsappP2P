@@ -121,6 +121,7 @@ class ClientInformationTracker:
         server_thread = Thread(target=self.serve_requests)
         server_thread.setDaemon(True)
         server_thread.start()
+        server_thread.join()
 
     def check_client(self, client_id, client_ip, client_port):
         if not isinstance(client_id, str) or not len(client_id) <= 20:
