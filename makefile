@@ -1,5 +1,5 @@
 CHORDPEER=tracker/dht/handler.py
-DEPENDENCIES=zmq cloudpickle pyinstaller
+DEPENDENCIES=zmq cloudpickle pyinstaller python3-pyqt5
 TRACKERLAUNCHER=tracker/launcher.py
 TRACKERLAUNCHERARGS=localhost:8000, localhost:8002, localhost:8005
 CLIENTDIR=client/
