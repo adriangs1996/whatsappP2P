@@ -17,6 +17,10 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
         self.check_regitration()
         self.setupUi()
 
+    def closeEvent(self, event):
+        self.client.save_client_state()
+        event.accept()
+
     def setupUi(self):
         self.setObjectName("MainWindow")
         self.resize(793, 560)
@@ -55,7 +59,7 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
         self.label_2.setGeometry(QtCore.QRect(197, 25, 141, 41))
         self.label_2.setObjectName("label_2")
         self.pushButton_del_contact = QtWidgets.QPushButton(self.scrollAreaWidgetContents)
-        self.pushButton_del_contact.setGeometry(QtCore.QRect(595, 100, 131, 31))
+        self.pushButton_del_contact.setGeometry(QtCore.QRect(595, 120, 131, 31))
         #self.pushButton_del_contact.setGeometry(QtCore.QRect(600, 100, 131, 31))
         self.pushButton_del_contact.setObjectName("pushButton_del_contact")
         self.label_3 = QtWidgets.QLabel(self.scrollAreaWidgetContents)
@@ -63,26 +67,26 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
         #self.label_3.setGeometry(QtCore.QRect(600, 10, 91, 31))
         self.label_3.setObjectName("label_3")
         self.lineEdit = QtWidgets.QLineEdit(self.scrollAreaWidgetContents)
-        self.lineEdit.setGeometry(595, 160, 131, 25)
+        self.lineEdit.setGeometry(595, 210, 131, 25)
         self.lineEdit.setObjectName("search_input")
         self.pushButton_search_contact = QtWidgets.QPushButton(self.scrollAreaWidgetContents)
-        self.pushButton_search_contact.setGeometry(QtCore.QRect(595, 190, 131, 31))
+        self.pushButton_search_contact.setGeometry(QtCore.QRect(595, 170, 131, 31))
         #self.pushButton_search_contact.setGeometry(QtCore.QRect(600, 150, 131, 31))
         self.pushButton_search_contact.setObjectName("pushButton_search_contact")
         self.pushButton_add_contact = QtWidgets.QPushButton(self.scrollAreaWidgetContents)
         #self.pushButton_add_contact.setGeometry(QtCore.QRect(600, 50, 131, 31))
-        self.pushButton_add_contact.setGeometry(QtCore.QRect(595, 50, 131, 31))
+        self.pushButton_add_contact.setGeometry(QtCore.QRect(595, 90, 131, 31))
         self.pushButton_add_contact.setObjectName("pushButton_add_contact")
-        self.scrollArea_2 = QtWidgets.QScrollArea(self.scrollAreaWidgetContents)
-        self.scrollArea_2.setGeometry(QtCore.QRect(197, 69, 371, 341))
-        # self.scrollArea_2.setGeometry(QtCore.QRect(590, 200, 141, 211))
-        self.scrollArea_2.setWidgetResizable(True)
-        self.scrollArea_2.setObjectName("scrollArea_2")
+        # self.scrollArea_2 = QtWidgets.QScrollArea(self.scrollAreaWidgetContents)
+        # self.scrollArea_2.setGeometry(QtCore.QRect(197, 69, 371, 341))
+        # # self.scrollArea_2.setGeometry(QtCore.QRect(590, 200, 141, 211))
+        # self.scrollArea_2.setWidgetResizable(True)
+        # self.scrollArea_2.setObjectName("scrollArea_2")
         self.scrollAreaWidgetContents_2 = QtWidgets.QWidget()
         self.scrollAreaWidgetContents_2.setGeometry(QtCore.QRect(0, 0, 369, 339))
         #self.scrollAreaWidgetContents_2.setGeometry(QtCore.QRect(0, 0, 139, 209))
         self.scrollAreaWidgetContents_2.setObjectName("scrollAreaWidgetContents_2")
-        self.scrollArea_2.setWidget(self.scrollAreaWidgetContents_2)
+        # self.scrollArea_2.setWidget(self.scrollAreaWidgetContents_2)
         self.scrollArea.setWidget(self.scrollAreaWidgetContents)
         self.gridLayout.addWidget(self.scrollArea, 0, 0, 1, 1)
         self.setCentralWidget(self.centralwidget)
@@ -93,6 +97,12 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
         self.statusbar = QtWidgets.QStatusBar(self)
         self.statusbar.setObjectName("statusbar")
         self.setStatusBar(self.statusbar)
+        self.conversList = QtWidgets.QListWidget(self.scrollAreaWidgetContents)
+        self.conversList.setObjectName("conversList")
+        self.conversList.setGeometry(QtCore.QRect(197, 69, 371, 341))
+        self.pushButton_register = QtWidgets.QPushButton(self.scrollAreaWidgetContents)
+        self.pushButton_register.setGeometry(QtCore.QRect(595, 44, 131, 31))
+        self.pushButton_register.setObjectName("pushButton_register")        
         
         self.set_contact_list()
 
@@ -103,11 +113,11 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
         self.pushButton_del_contact.clicked.connect(self.button_del_contact_clicked)
         self.pushButton_search_contact.clicked.connect(self.button_search_contact_clicked)
         self.pushButton_send.clicked.connect(self.button_send_clicked)
-        
+        self.pushButton_register.clicked.connect(self.check_regitration)
 
     def retranslateUi(self, MainWindow):
         _translate = QtCore.QCoreApplication.translate
-        MainWindow.setWindowTitle(_translate("MainWindow", "MainWindow"))
+        MainWindow.setWindowTitle(_translate("MainWindow", "WhatsAppP2P"))
         self.pushButton_send.setText(_translate("MainWindow", "Send"))
         self.label.setText(_translate("MainWindow", "Contacts"))
         self.label_2.setText(_translate("MainWindow", "Contact_Name"))
@@ -115,61 +125,94 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
         self.label_3.setText(_translate("MainWindow", "Options"))
         self.pushButton_search_contact.setText(_translate("MainWindow", "Search Contact"))
         self.pushButton_add_contact.setText(_translate("MainWindow", "Add Contact"))
+        self.pushButton_register.setText(_translate("MainWindow", "Register"))
 
     def set_contact_list(self):
-        for contact, value in self.client.contacts_info.keys():
-            item = CustomListItem(contact, self.client.contacts_info[contact])
-            self.listWidget_contacts.insertItem(item)
+        for contact in self.client.contacts_info.keys():
+            item = CustomListItem(contact, self.client.contacts_info[contact])  
+            item.setText(item.contact_name)          
+            self.listWidget_contacts.addItem(item)
 
     def button_add_contact_clicked(self):
         cont = self.listWidget_2.currentItem()
         if cont:
             newinfo = self.client.add_contact(cont.text())
-            self.listWidget_contacts.insertItem(CustomListItem(cont.text(), newinfo)) 
+            item = CustomListItem(cont.text(), newinfo)
+            item.setText(item.contact_name)
+            self.listWidget_contacts.addItem(item) 
 
     def button_del_contact_clicked(self):
         cont = self.listWidget_contacts.currentItem()
         if cont:
             self.client.delete_contact(cont.text())
             self.listWidget_contacts.removeItemWidget(cont)
+            self.listWidget_contacts.repaint()
 
     def button_search_contact_clicked(self):
         result = self.client.search_contact(self.lineEdit.text())
+        self.listWidget_2.clear()
         print(result)
         if result:
-            self.listWidget_2.insertItem(0, CustomListItem(self.lineEdit.text(), result))
-            print(self.listWidget_2.count())
-            self.listWidget_2.repaint()
+            item = CustomListItem(self.lineEdit.text(), result)
+            item.setText(item.contact_name)
+            self.listWidget_2.addItem(item)
+
             
             
     def contact_list_item_selected(self):
         item = self.listWidget_contacts.currentItem()
+        if item.contact_name != self.client.active_user:
+            self.client.active_user = item.contact_name
+            self.label_2.setText(item.contact_name)
+            self.show_conversation(item.contact_data['conversation'])
 
 
     def button_send_clicked(self):
         text = self.textEdit.toPlainText()
         target = self.listWidget_contacts.currentItem()
-        self.client.send_message_client(target.contact_name, text)
+        if self.client.send_message_client(target.contact_name, text):
+            item = CustomListItem(target.contact_name, text)
+            item.setText(f'{item.contact_name}\n {item.contact_data}')
+            self.conversList.addItem(item)
+            item.setTextAlignment(0x002)
+            if target.contact_data['conversation'].count < self.conversList.count():
+                self.conversList.takeItem(0)
+        
         
     def check_regitration(self):
         if not self.client.registered:
             self.dialog.show()
         
     def show_conversation(self, messg_list):
+        self.conversList.clear()
         for mesg in messg_list:
-            widget = QtWidgets.QTextEdit()
-            widget.setText(mesg.text)
-            
-            self.scrollArea_2.setWidget(widget)
+            item = CustomListItem(mesg.sender, mesg.text)
+            item.setText(f'{item.contact_name}\n {item.contact_data}')
+            self.conversList.addItem(item) 
             if not mesg.sender == self.client.username:
-                self.scrollArea_2.setAlignment()
-              
+                item.setTextAlignment(0x001)
+            else:
+                item.setTextAlignment(0x002)
+
+    def handle_incomming_messages(self):
+        queue = self.client.incomming_queue
+        while True:
+            message = self.client.incomming_queue.pop()
+            current_sender = self.listWidget_contacts.currentItem()
+            while not queue.isEmpty:
+                if current_sender == message.sender:
+                    item = CustomListItem(message.sender, message.text)
+                    item.setText(f'{item.contact_name}\n {item.contact_data}')
+                    self.conversList.addItem(item)
+                    item.setTextAlignment(0x001)                
+                else:
+                    self.client.__log_message__(message.sender, message)
 
 class CustomConversation(QtWidgets.QWidget):
     def __init__(self):
         QtWidgets.QWidget.__init__(self)
         self.items = []
-        self.setLayout(QtWidgets.QGridLayout)
+        self.setLayout(QtWidgets.QVBoxLayout)
 
     def addItem(self, item):
         self.items.append(item)

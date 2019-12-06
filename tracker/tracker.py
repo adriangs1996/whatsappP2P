@@ -71,7 +71,7 @@ def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
     # clients should test for a server response to know whether
     # it's active, or is down.
     tries = 8
-    timeout = 10
+    timeout = 100
     while tries:
         if client_sock.poll(timeout=timeout, flags=zmq.POLLIN):
             break
@@ -83,7 +83,6 @@ def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
         raise NoResponseException
 
     response = client_sock.recv_pyobj()['response']
-    print(response)
 
     if isinstance(response, list):
         rep = []
@@ -92,7 +91,6 @@ def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
         response = rep
 
     client_sock.close()
-    print(response)
     return response
 
 
@@ -119,17 +117,16 @@ class ClientInformationTracker:
         self.ip_address = address
         self.port = port
 
+    def start_services(self):
         server_thread = Thread(target=self.serve_requests)
         server_thread.setDaemon(True)
         server_thread.start()
-
-        server_thread.join()
 
     def check_client(self, client_id, client_ip, client_port):
         if not isinstance(client_id, str) or not len(client_id) <= 20:
             return False
 
-        client_key = sha1(bytes("%s" % client_id, 'ascii'))
+        client_key = int(sha1(bytes("%s" % client_id, 'ascii')).hexdigest(), 16)
 
         logging.info("verifiying if client %s is registered", client_id)
 
@@ -218,7 +215,7 @@ class ClientInformationTracker:
         return True
 
     def enqueue_message(self, client_id, client_ip, client_port, message):
-        user_id = sha1(bytes("%s" % client_id, 'ascii'))
+        user_id = int(sha1(bytes("%s" % client_id, 'ascii')).hexdigest(), 16)
 
         chord_peer = self.__find_alive_chord()
         request(

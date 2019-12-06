@@ -16,7 +16,7 @@ KEY_SIZE = 160
 MAX_TRIES = 5
 DATA_RECV = 1024
 STABILIZE_INTERVAL = 1
-FINGERS_INTERVAL = 1
+FINGERS_INTERVAL = 4
 UPDATE_SUCCESORS_INTERVAL = 1
 MAX_SUCCESORS = 7  # log2(160) ~ 7
 URL_REGEX = re.compile(
@@ -322,11 +322,11 @@ class Node:
     @repeat_when_socket_fail(MAX_TRIES)
     def stabilize(self):
         succesor = self.succesor()
-        if succesor.id() != self.fingers[0].id(1):
+        if succesor.id() != self.fingers[0].id():
             self.fingers[0] = succesor
 
         pred = succesor.predecessor()
-        if pred is not None and between(pred.id(), self.id(1), succesor.id(1))\
+        if pred is not None and between(pred.id(), self.id(1), succesor.id())\
                 and self.id(1) != succesor.id() and pred.ping():
             self.fingers[0] = pred
 
@@ -340,7 +340,7 @@ class Node:
         if self.predecessor() is None or not self.predecessor().ping() or between(
             remote_node_reference.id(),
             self.predecessor().id(1),
-            self.id(1)
+            self.id()
         ):
             self._predecessor = remote_node_reference
 
@@ -389,6 +389,7 @@ class Node:
             if succ_list:
                 successors += succ_list
             self.succesors = successors
+        return True
 
     def get_succesors(self):
         if len(self.succesors) == MAX_SUCCESORS:
@@ -421,7 +422,7 @@ class Node:
         # Create the socket server
         server_sock = socket.socket()
         server_sock.bind((self.ip, self.port))
-        server_sock.listen()  # TODO: Pherhaps use a threshold here??
+        server_sock.listen(10)  # TODO: Pherhaps use a threshold here??
 
         while True:
             try:
@@ -446,8 +447,7 @@ class Node:
                     if isinstance(response, (RemoteNodeReference, Node)):
                         response = (response.ip, response.port)
 
-                    if response is not None:
-                        client_sock.sendall(dumps(response) + b"!!")
+                    client_sock.sendall(dumps(response) + b"!!")
             client_sock.close()
 
     def start_service(self):
@@ -463,12 +463,12 @@ class Node:
         fix_fingers_daemon.start()
         update_succesors_daemon.start()
 
-        # while 1:
-        #     logging.debug(" ** ******* NODE STATE *********\n" +
-        #                   f"Succesors: {self.succesors}\n" +
-        #                   f"Predecesor: {self.predecessor()}\n" +
-        #                   f"Current Succesor: {self.succesor()}")
-        #     sleep(5)
+        while 1:
+            logging.debug(" ** ******* NODE STATE *********\n" +
+                          f"Succesors: {self.succesors}\n" +
+                          f"Predecesor: {self.predecessor()}\n" +
+                          f"Current Succesor: {self.succesor()}")
+            sleep(5)
 
     def put(self, key, val):
         if between(key, self.predecessor().id(1), self.id(1)):

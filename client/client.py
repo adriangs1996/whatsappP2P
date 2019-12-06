@@ -25,6 +25,8 @@ class Client:
             self.outgoing_queue = {}    # {contact_name : queue with pending messages}
             #self.online_contacts = {}
             self.registered = False
+            self.active_user = None
+            self.incomming_queue = myQueue(auto_growth= True)
 
         #self.server_sock = self.__open_socket__()
         #self.is_sock_open = True
@@ -33,6 +35,8 @@ class Client:
     
         if self.registered:
             self.loggin()
+        
+        print('finished login')
 
         self.context = zmq.Context()
 
@@ -41,12 +45,12 @@ class Client:
         self.process_pending_messages()
         
         self.incomming_thread = Thread(target= self.__handle_incomming__)
-        self.incomming_thread.setDaemon(True)
+        #self.incomming_thread.setDaemon(True)
         self.incomming_thread.start()
 
     def __start_client__(self):
         #this is to start the client sockets
-        #context = zmq.Context()             #! this might be troublesome, in case of error check if this is the cause, try to solve it with global context
+        #context = zmq.Context()             
         self.incoming_sock = self.context.socket(zmq.REP)
         self.incoming_sock.bind(f'tcp://{self.ip}:{self.port}') 
         self.outgoing_sock = self.context.socket(zmq.REQ)
@@ -54,16 +58,39 @@ class Client:
 
     def __handle_incomming__(self):
         while True:
+            # if self.incoming_sock.closed:
+            #     self.incoming_sock = self.context.socket(zmq.REP)
+            #     self.incoming_sock.bind(f'tcp://{self.ip}:{self.port}')
+            # tries = 8
+            # timeout = 10
+            # while tries:
+            #     if self.incoming_sock.poll(timeout=timeout, flags=zmq.POLLIN):
+            #         print('connection in handle incomming')
+            #         break
+            #     print('no connection in handle incomming')
+            #     self.incoming_sock.setsockopt(zmq.LINGER, 0)
+            #     self.incoming_sock.close()
+            #     self.incoming_sock = self.context.socket(zmq.REP)
+            #     self.incoming_sock.bind(f'tcp://{self.ip}:{self.port}')
+            #     # client_sock.send_json(json_to_send)
+            #     tries -= 1
+            #     timeout *= 2
+            # # No server response
+            # if not tries:
+            #     # client_sock.close()
+            #     print('not tries in handle incomming')
+            #     continue
+            
             messg = self.incoming_sock.recv_pyobj()
             if not isinstance(messg, Message):
                 if messg == 'ping':
                     self.incoming_sock.send_string('online')
             else:
-                self.__log_message__(messg.sender, messg)
-                # try:
-                #     self.contacts_info[messg.sender]['conversation'].smart_enqueue(messg)
-                # except KeyError:
-                #     self.contacts_info[messg.sender]['conversation'] = myQueue([messg])
+                sender = messg.sender
+                if sender == self.active_user:
+                    self.incomming_queue.enqueue(messg)
+                else:
+                    self.__log_message__(sender, messg)                
                 self.incoming_sock.send_json({'response': True})
 
 
@@ -78,14 +105,15 @@ class Client:
                 
         for t_ip,t_port in self.servers:
             try:
-                reply = request_tracker_action(t_ip, t_port, 'register_client', user= username, ip= self.ip, port= self.port)
+                reply = request_tracker_action2(t_ip, t_port, 'register_client', user= username, ip= self.ip, port= self.port)
                 print('sent request from client')
                 print(reply)
                 if reply:
                     self.registered = True
                     self.username = username
                     break     
-            except:
+            except NoResponseException:
+                print('no response in register')
                 continue
 
             if not reply:
@@ -103,16 +131,23 @@ class Client:
         enviarlo al servidor con cada inicio de sesion.
         '''
         for t_ip,t_port in self.servers:
-            try:
-                reply = request_tracker_action(t_ip, t_port, 'check_client', user= self.username, ip= self.ip, port= self.port)
-                for item in reply:
-                    self.__log_message__(item.sender, item)
-            except:
+            print('entered cycle')
+            reply = request_tracker_action2(t_ip, t_port, 'check_client', user= self.username, ip= self.ip, port= self.port)
+            print('return')
+            if reply == None:
+                print('no response in login')
                 continue
+            for item in reply:
+                self.__log_message__(item.sender, item)
+            print('ok')
+
+        
+        print('---------------------------------------------')
+                
             
 
 
-    def send_message_client(self, target_client, message) -> bool:          #//done, i think
+    def send_message_client(self, target_client, message):          #//done, i think
         '''
         Envia un mensaje al cliente destino.
         '''
@@ -121,8 +156,10 @@ class Client:
         address = self.get_peer_address(target_client)
         if not self.__send_message__(address, message):
             self.enqueue_message(target_client, message)
+            return False
         else:
             self.__log_message__(target_client, message)
+            return True
 
     def __send_message__(self, target_address, message) -> bool:   # target_address is a string of the form 'ip_address:port' #//done
         reply = None
@@ -170,7 +207,8 @@ class Client:
                 reply = request_tracker_action(t_ip, t_port, 'enqueue_message', message)
                 if reply:
                     return True
-            except:
+            except NoResponseException:
+                print('no response in send to queue')
                 return False
                     
 
@@ -198,11 +236,11 @@ class Client:
     def update_contact_info(self, contact_name):            #// done
         for (t_ip, t_port) in self.servers:
             try:
-                response = request_tracker_action(t_ip, t_port, 'locate', user= contact_name)
+                response = request_tracker_action2(t_ip, t_port, 'locate', user= contact_name)
                 if response:
                     self.contacts_info[contact_name]['addr'] = response
                     return
-            except:
+            except NoResponseException:
                 continue   
        
     
@@ -217,9 +255,10 @@ class Client:
 
 
     def __log_message__(self, target_client, message):      #//auxiliary method, done
-        if self.contacts_info[target_client]['conversation'] == None:
-            self.contacts_info[target_client]['conversation'] = myQueue()
-        self.contacts_info[target_client]['conversation'].smart_enqueue(message)
+        queue_temp = self.contacts_info[target_client]['conversation']
+        if queue_temp == None:
+            queue_temp = myQueue()
+        queue_temp.smart_enqueue(message)
 
     def send_adj_client(self, target_client, target_file):  #todo
         '''
@@ -261,8 +300,13 @@ class Client:
         d={}
         for key in self.__dict__.keys():
             t = type(self.__dict__[key])
-            if t is not zmq.Socket and t is not zmq.Context:                
-                d[key] = self.__dict__[key]
+            value = self.__dict__[key]
+            if isinstance(value, (zmq.Socket, zmq.Context, Thread)):
+                continue
+            d[key] = value
+            # if t is not zmq.Socket and t is not zmq.Context:                
+            #     d[key] = self.__dict__[key]
+        
         filestream = open(f'wsp_client.bin', mode ='wb')
         cloudpickle.dump(d, filestream)
         filestream.close()
@@ -278,6 +322,8 @@ class Client:
 
         for key in client_info:
             self.__dict__[key] = client_info[key]
+
+        print('finished restore')
 
     async def discover_online_contacts(self):               #// done, not conviced
         '''
@@ -319,7 +365,7 @@ class Client:
     def search_contact(self, contact_name):
         for t_ip,t_port in self.servers:
             try:
-                reply = request_tracker_action(t_ip, t_port, 'locate', user= contact_name)
+                reply = request_tracker_action2(t_ip, t_port, 'locate', user= contact_name)
                 print(reply)
             except NoResponseException:
                 print('entered exception')
@@ -439,61 +485,92 @@ class Message:
         Devuelve la fecha en la que se envio el mensaje
         '''
         return self.timestamp
-        
 
+def get_json_from_action(action, **kwargs):
+    json_res = None
+    assert(action in ('locate', 'check_client', 'register_client', 'enqueue_message'))
 
-# def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
-#     '''
-#     Tracker request can only contain 3 actions: check_client, register_client\
-#             or locate.
-#     @param tracker_ip   : Know tracker ip to ask to
-#     @param tracker_port : The tracker port where service is active
-#     @param action       : Desire action to execute on the tracker
-#     @kwargs             : Keyword args with the following keys:
-#     user := username to trackto (either to check or register or locate)
-#     ip   := ip of the sender (only needed for check or register)
-#     port := port of the sender service (only needed for check or register)
-#     '''
-#     # Create the client socket
-#     client_context = zmq.Context()
-#     client_sock = client_context.socket(zmq.REQ)
-#     assert(action in ('locate', 'check_client', 'register_client'))
-#     client_sock.connect("tcp://%s:%d" % (tracker_ip, tracker_port))
-#     if action in ('check_client', 'register_client'):
-#         client_sock.send_json(
-#             {'action': action,
-#                 'id': kwargs['user'],
-#                 'ip': kwargs['ip'],
-#                 'port': kwargs['port']
-#                 }
-#             )
-#     # The other posibility is only 'locate'
-#     else:
-#         client_sock.send_json(
-#             {
-#                 'action': action,
-#                 'id': kwargs['user']
-#             }
-#             )
-#     # Check if server is responding
-#     # clients should test for a server response to know whether
-#     # it's active, or is down.
-#     tries = 8
-#     timeout = 1000
-#     while tries:
-#         if client_sock.poll(timeout=timeout, flags=zmq.POLLIN):
-#             break
-#         tries -= 1
-#         timeout *= 2
-#     # No server response
-#     if not tries:
-#         client_sock.close()
-#         raise NoResponseException
+    if action in ('check_client', 'register_client'):
+        json_res = {'action': action,
+             'id': kwargs['user'],
+             'ip': kwargs['ip'],
+             'port': kwargs['port']
+             }
 
-#     response = client_sock.recv_json()['response']
-#     client_sock.close()
-#     return response
+    elif action == "enqueue_message":
+        message = kwargs['message']
+        marshalled_message = dumps(message)
+        json_res = {
+                'action': action,
+                'marshalled': marshalled_message,
+                'ip': kwargs['ip'],
+                'port': kwargs['port'],
+                'id': message.receiver
+            }
+    # The other posibility is only 'locate'
+    else:
+        json_res = {
+                'action': action,
+                'id': kwargs['user']
+            }
 
+    return json_res
+
+def request_tracker_action2(tracker_ip, tracker_port, action, **kwargs):
+    '''
+    Tracker request can only contain 3 actions: check_client, register_client\
+         or locate.
+    @param tracker_ip   : Known tracker ip to ask to
+    @param tracker_port : The tracker port where service is active
+    @param action       : Desire action to execute on the tracker
+    @kwargs             : Keyword args with the following keys:
+    user := username to trackto (either to check or register or locate)
+    ip   := ip of the sender (only needed for check or register)
+    port := port of the sender service (only needed for check or register)
+    message:= Message (object)
+    '''
+    # Create the client socket
+    json_to_send = get_json_from_action(action, **kwargs)
+
+    client_context = zmq.Context()
+    client_sock = client_context.socket(zmq.REQ)
+    client_sock.connect("tcp://%s:%d" % (tracker_ip, tracker_port))
+    client_sock.send_json(json_to_send)
+    
+    # Check if server is responding
+    # clients should test for a server response to know whether
+    # it's active, or is down.
+    tries = 8
+    timeout = 10
+    while tries:
+        if client_sock.poll(timeout=timeout, flags=zmq.POLLIN):
+            print('connection')
+            break
+        print('no connection')
+        client_sock.setsockopt(zmq.LINGER, 0)
+        client_sock.close()
+        client_sock = client_context.socket(zmq.REQ)
+        client_sock.connect("tcp://%s:%d" % (tracker_ip, tracker_port))
+        # client_sock.send_json(json_to_send)
+
+        tries -= 1
+        timeout *= 2
+    # No server response
+    if not tries:
+        # client_sock.close()
+        print('++++++++++++++')
+        return None
+
+    response = client_sock.recv_pyobj()['response']
+    if isinstance(response, list):
+        rep = []
+        for message in response:
+            rep.append(loads(message))
+        response = rep
+
+    client_sock.close()
+    return response
+    
 def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
     '''
     Tracker request can only contain 3 actions: check_client, register_client\
@@ -553,7 +630,9 @@ def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
     # No server response
     if not tries:
         client_sock.close()
-        raise NoResponseException()
+        print('++++++++++++++')
+        # raise NoResponseException()
+        return None
 
     response = client_sock.recv_pyobj()['response']
     if isinstance(response, list):
