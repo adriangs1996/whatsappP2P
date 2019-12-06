@@ -6,3 +6,6 @@ __pycache__
 
 # ignoring vscode config dir
 .vscode
+
+# ignoring our files
+*.txt
