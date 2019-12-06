@@ -3,26 +3,28 @@ DEPENDENCIES=zmq cloudpickle pyinstaller
 TRACKERLAUNCHER=tracker/launcher.py
 TRACKERLAUNCHERARGS=localhost:8000, localhost:8002, localhost:8005
 CLIENTDIR=client/
-CLIENTEXE=test.py
+CLIENTEXE=client/test.py
+PYTHONDEPS=python3-dev python-dev
+PYTHON=python3
 
 .PHONY: test
 test:
-	python $(CHORDPEER) -i localhost -p 8000 &
+	$(PYTHON) $(CHORDPEER) -i localhost -p 8000 &
 	sleep(1)
-	python $(CHORDPEER) -i localhost -p 8001 -t "localhost:8000" &
+	$(PYTHON) $(CHORDPEER) -i localhost -p 8001 -t "localhost:8000" &
 	sleep(1)
-	python $(CHORDPEER) -i localhost -p 8002 -t "localhost:8000" &
+	$(PYTHON) $(CHORDPEER) -i localhost -p 8002 -t "localhost:8000" &
 	sleep(1)
-	python $(CHORDPEER) -i localhost -p 8003 -t "localhost:8002" &
+	$(PYTHON) $(CHORDPEER) -i localhost -p 8003 -t "localhost:8002" &
 	sleep(1)
-	python $(CHORDPEER) -i localhost -p 8004 -t "localhost:8001" &
+	$(PYTHON) $(CHORDPEER) -i localhost -p 8004 -t "localhost:8001" &
 	sleep(1)
-	python $(CHORDPEER) -i localhost -p 8005 -t "localhost:8001" &
+	$(PYTHON) $(CHORDPEER) -i localhost -p 8005 -t "localhost:8001" &
 	sleep(1)
-	python $(TRACKERLAUNCHER) -i localhost -p 8080 -t $(TRACKERLAUNCHERARGS) &
-	python $(TRACKERLAUNCHER) -i localhost -p 8888 -t $(TRACKERLAUNCHERARGS) &
+	$(PYTHON) $(TRACKERLAUNCHER) -i localhost -p 8080 -t $(TRACKERLAUNCHERARGS) &
+	$(PYTHON) $(TRACKERLAUNCHER) -i localhost -p 8888 -t $(TRACKERLAUNCHERARGS) &
 	cd $(CLIENTDIR)
-	python test.py &
+	$(PYTHON) test.py &
 	cd ..
 
 .PHONY: clean
@@ -33,6 +35,6 @@ clean:
 .PHONY: install
 install:
 	pip install $(DEPENDENCIES)
+	sudo apt-get install $(PYTHONDEPS)
 	# Make a executable app
-	cd $(CLIENTDIR)
 	pyinstaller --onefile $(CLIENTEXE)
