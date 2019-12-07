@@ -482,6 +482,7 @@ class Node:
         #     sleep(5)
 
     def put(self, key, val):
+        logging.debug(f"Putting {key} in <{self.ip}:{self.port}")
         if between(key, self.predecessor().id(1), self.id()):
             self.storage[key] = val
             # make that our succesors update the key
@@ -489,6 +490,7 @@ class Node:
                 if node.ping():
                     node.simple_put(key, val)
         else:
+            logging.debug(f"{self} not responsible for key {key}")
             node = self.find_successor(key)
             node.put(key, val)
         return True
