@@ -14,7 +14,7 @@ NOTPEND = 1
 
 class Client:  
 
-    def __init__(self, *args, **kwargs):   
+    def __init__(self, ip = None, port = 0):   
         # .*args = server_addr, self.ip, self.port si se esta instanciando un cliente nuevo, 
         # #si no *args = client_identifier para restaurarlo'
         # if len(args) <= 2:
@@ -23,8 +23,16 @@ class Client:
         try:
             Client.restore_client(self)
         except:
-            self.ip = socket.gethostbyname(socket.gethostname())           
-            self.port = randint(3001, 9000)
+            print(ip)
+            if ip:
+                self.ip = ip
+            else:
+                self.ip = socket.gethostbyname(socket.gethostname())     
+            if port:
+                self.port = port
+            else:
+                self.port = randint(3001, 9000)
+
             self.contacts_info = {}          # {contact_name : {'addr': address (*tuple ip,port*), 'online' : bool, 'conversation': myQueue(messages)}}
             self.outgoing_queue = myQueue(capacity= 50, auto_growth= True, items=[])    # myQueue with pending messages
             self.registered = False
@@ -63,18 +71,19 @@ class Client:
         while True:
             try:
                 messg = self.incoming_sock.recv_pyobj()
+                print(messg)
             except Exception as error:
                 print(error)
                 continue
             else:
-                print(messg)
-                print(self.active_user)
                 if not isinstance(messg, Message):
                     if messg == 'ping':
                         self.incoming_sock.send_string('online')
                 else:
-                    self.__log_message__(messg.sender, messg)                
                     self.incoming_sock.send_pyobj({'response': True})
+                    print('response sent')
+                    self.__log_message__(messg.sender, messg)                
+
 
 
     def register(self, username) -> bool:          #// done
@@ -170,18 +179,18 @@ class Client:
             return False
         
         self.outgoing_sock.send_pyobj(message)
-        print('message sent, waiting for response')
+        print('waiting for response in send message')
 
-        tries = 3
+        tries = 8
         tout = 100
         while tries:
             if self.outgoing_sock.poll(timeout= tout, flags= zmq.POLLIN):
                 break
             print('out of poll')
-            self.outgoing_sock.setsockopt(zmq.LINGER, 0)
-            self.outgoing_sock.close()
-            self.outgoing_sock = self.context.socket(zmq.REQ)
-            self.outgoing_sock.connect(f'tcp://{target_address}')
+            # self.outgoing_sock.setsockopt(zmq.LINGER, 0)
+            # self.outgoing_sock.close()
+            # self.outgoing_sock = self.context.socket(zmq.REQ)
+            # self.outgoing_sock.connect(f'tcp://{target_address}')
             tries -= 1
             tout *= 2
         if not tries:
@@ -209,23 +218,6 @@ class Client:
                 continue
 
 
-    def process_pending_messages_OLD(self):
-        while True:
-            if not self.outgoing_queue.isEmpty:
-                message = self.outgoing_queue.peek()
-                address = self.get_peer_address(message.receiver) 
-                print('attempting to resend message')               
-                if not self.__send_pending_message__(address, message):
-                    if self.send_message_to_server_queue(message):
-                        print('message sent to server')
-                    else:
-                        print('message not sent from process pending')
-                        continue             
-                else:
-                    print('message sent to client')
-                self.__log_message__(message.receiver, message)
-                self.outgoing_queue.pop()
-
     def __send_pending_message__(self, target_address, message):
         reply = None
         if self.pending_sock.closed:
@@ -236,7 +228,7 @@ class Client:
             return False
         
         self.pending_sock.send_pyobj(message)
-        print('message sent, waiting for response')
+        print('waiting for response from resend')
 
         tries = 3
         tout = 10
@@ -253,11 +245,11 @@ class Client:
         if not tries:
             self.pending_sock.setsockopt(zmq.LINGER, 0)
             self.pending_sock.close()
-            print('message not received, socket closed')
+            print('resent message not received, socket closed')
             return False
 
         reply = self.pending_sock.recv_pyobj()
-        print('message received')
+        print('resent message received')
         return True
     
     def send_message_to_server_queue(self, message): 
@@ -639,8 +631,7 @@ def request_tracker_action2(tracker_ip, tracker_port, action, **kwargs):
         client_sock.close()
         client_sock = client_context.socket(zmq.REQ)
         client_sock.connect("tcp://%s:%d" % (tracker_ip, tracker_port))
-        # client_sock.send_json(json_to_send)
-
+        
         tries -= 1
         timeout *= 2
     # No server response

@@ -27,9 +27,9 @@ class Worker(QtCore.QObject):
 LEFTALGN = 0x001
 RIGHTALGN = 0x002
 class Ui_MainWindow(QtWidgets.QMainWindow):
-    def __init__(self):
+    def __init__(self, ip = None, port = 0):
         QtWidgets.QMainWindow.__init__(self)
-        self.client = Client()
+        self.client = Client(ip, port)
         self.dialog = Ui_Dialog(self.client)
         self.check_regitration()
         self.setupUi()
