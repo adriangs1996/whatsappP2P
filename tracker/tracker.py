@@ -32,12 +32,12 @@ def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
     # Create the client socket
     client_context = zmq.Context()
     client_sock = client_context.socket(zmq.REQ)
-    assert(action in (
+    assert action in (
         'locate',
         'check_client',
         'register_client',
         'enqueue_message'
-    ))
+    ), f"invalid action {action}"
     client_sock.connect("tcp://%s:%d" % (tracker_ip, tracker_port))
     if action in ('check_client', 'register_client'):
         client_sock.send_json(
@@ -121,7 +121,7 @@ class ClientInformationTracker:
         server_thread = Thread(target=self.serve_requests)
         server_thread.setDaemon(True)
         server_thread.start()
-        #server_thread.join()
+        server_thread.join()
 
     def check_client(self, client_id, client_ip, client_port):
         if not isinstance(client_id, str) or not len(client_id) <= 20:
