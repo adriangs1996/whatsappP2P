@@ -11,10 +11,10 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 
 class Ui_Dialog(QtWidgets.QDialog):
     def __init__(self, Client):
-        QtWidgets.QWidget.__init__(self)
-        #self.diag = QtWidgets.QDialog()
+        QtWidgets.QDialog.__init__(self)
         self.setupUi()
         self.client = Client
+        self.canceled = False
 
     # def show(self):
     #     self.diag.show()
@@ -42,6 +42,7 @@ class Ui_Dialog(QtWidgets.QDialog):
         self.buttonBox.setStandardButtons(QtWidgets.QDialogButtonBox.Cancel|QtWidgets.QDialogButtonBox.Ok)
         self.buttonBox.setObjectName("buttonBox")
         self.buttonBox.buttons()[0].clicked.connect(self.ok_button_clicked)
+        #self.buttonBox.buttons()[1].clicked.connect(self.cancel_button_clicked)
 
         self.retranslateUi(self)
         #self.buttonBox.accepted.connect(Dialog.accept)
@@ -54,10 +55,10 @@ class Ui_Dialog(QtWidgets.QDialog):
         self.label_3.setText(_translate("Dialog", "! Oops, you need to sign up !"))
         self.label.setText(_translate("Dialog", "Username"))
 
-    # def cancel_button_clicked(self):
-    #     print('Cancel pressed')
-
-
+    def cancel_button_clicked(self):
+        self.canceled = True
+        self.close()
+        
     def ok_button_clicked(self):
         self.Accepted = False
         try:
