@@ -62,7 +62,14 @@ class Client:
     def __start_client__(self):
         #this is to start the client sockets
         self.incoming_sock = self.context.socket(zmq.REP)
-        self.incoming_sock.bind(f'tcp://{self.ip}:{self.port}') 
+        while True:
+            try:
+                self.incoming_sock.bind(f'tcp://{self.ip}:{self.port}') 
+                break
+            except:
+                self.port = randint(3001, 9000)
+            else:
+                continue
         self.outgoing_sock = self.context.socket(zmq.REQ)
         self.pending_sock = self.context.socket(zmq.REQ)
         
