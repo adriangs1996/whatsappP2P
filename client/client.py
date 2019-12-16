@@ -14,12 +14,7 @@ NOTPEND = 1
 
 class Client:  
 
-    def __init__(self, ip = None, port = 0):   
-        # .*args = server_addr, self.ip, self.port si se esta instanciando un cliente nuevo, 
-        # #si no *args = client_identifier para restaurarlo'
-        # if len(args) <= 2:
-        #     Client.restore_client(args[1])
-        # else:
+    def __init__(self, ip = None, port = 0):          
         try:
             Client.restore_client(self)
         except:
@@ -162,7 +157,6 @@ class Client:
         if target_client not in self.contacts_info.keys():
             self.add_contact(target_client)
         address = self.get_peer_address(target_client)
-        #self.enqueue_message(target_client, message)
         if not self.__send_message__(address, message):
             self.enqueue_message(target_client, message)
             return False
@@ -171,14 +165,11 @@ class Client:
             return True
 
     def __send_message__(self, target_address, message) -> bool:   # target_address is a string of the form 'ip_address:port' #//done
-        # if not self.outgoing_queue.isEmpty and flag:
-        #     return False
         
         reply = None
         if self.outgoing_sock.closed:
             self.outgoing_sock = self.context.socket(zmq.REQ)
-        try:
-            #self.outgoing_sock.disconnect()
+        try:            
             self.outgoing_sock.connect(f'tcp://{target_address}')
             print(target_address)
         except:
@@ -194,10 +185,6 @@ class Client:
             if self.outgoing_sock.poll(timeout= tout, flags= zmq.POLLIN):
                 break
             print('out of poll')
-            # self.outgoing_sock.setsockopt(zmq.LINGER, 0)
-            # self.outgoing_sock.close()
-            # self.outgoing_sock = self.context.socket(zmq.REQ)
-            # self.outgoing_sock.connect(f'tcp://{target_address}')
             tries -= 1
             tout *= 2
         if not tries:
@@ -326,7 +313,6 @@ class Client:
         except KeyError:
             print('key error logging message')
             self.add_contact(target_client)
-            # self.pending_users.enqueue(target_client)
         if queue_temp == None:
             queue_temp = myQueue(capacity=50, auto_growth=False, items=[])
             self.contacts_info[target_client]['conversation'] = queue_temp
@@ -378,8 +364,6 @@ class Client:
             if isinstance(value, (zmq.Socket, zmq.Context, Thread)):
                 continue
             d[key] = value
-            # if t is not zmq.Socket and t is not zmq.Context:                
-            #     d[key] = self.__dict__[key]
         
         filestream = open(f'wsp_client.bin', mode ='wb')
         cloudpickle.dump(d, filestream)
@@ -409,12 +393,10 @@ class Client:
         for contact in self.contacts_info.keys():
             online = self.check_online(contact)
             self.contacts_info[contact]['online'] = self.check_online(contact)
-            # if not online:
-            #     self.update_contact_info(contact)
+           
 
     def check_online(self, contact_name):                   #// auxiliary method, done
         c_ip,c_port = self.contacts_info[contact_name]['addr']
-        #contx = zmq.Context()
         socket = self.context.socket(zmq.REQ)
         socket.connect(f'tcp://{c_ip}:{c_port}')
         socket.send_pyobj('ping')
@@ -426,8 +408,7 @@ class Client:
             tries -= 1
             time *= 2
         if not tries:
-            socket.close()
-            #self.update_contact_info(contact_name)            
+            socket.close()           
             return False
         reply = socket.recv_string()
         socket.close()
@@ -566,7 +547,7 @@ class Message:
         return str({'from': self.__sender, 'to': self.__receiver, 'text': self.__text})
 
     # @property
-    # def timestamp(self):
+    # def timestamp(self):    esto esta por si después lo implementamos
     #     '''
     #     Devuelve la fecha en la que se envio el mensaje
     #     '''
@@ -627,7 +608,7 @@ def request_tracker_action2(tracker_ip, tracker_port, action, **kwargs):
     # Check if server is responding
     # clients should test for a server response to know whether
     # it's active, or is down.
-    tries = 8
+    tries = 5
     timeout = 100
     while tries:
         if client_sock.poll(timeout=timeout, flags=zmq.POLLIN):
@@ -643,7 +624,6 @@ def request_tracker_action2(tracker_ip, tracker_port, action, **kwargs):
         timeout *= 2
     # No server response
     if not tries:
-        # client_sock.close()
         print('raising exception')
         raise NoResponseException()
         #return None
@@ -659,78 +639,78 @@ def request_tracker_action2(tracker_ip, tracker_port, action, **kwargs):
     client_sock.close()
     return response
     
-def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
-    '''
-    Tracker request can only contain 3 actions: check_client, register_client\
-         or locate.
-    @param tracker_ip   : Known tracker ip to ask to
-    @param tracker_port : The tracker port where service is active
-    @param action       : Desire action to execute on the tracker
-    @kwargs             : Keyword args with the following keys:
-    user := username to trackto (either to check or register or locate)
-    ip   := ip of the sender (only needed for check or register)
-    port := port of the sender service (only needed for check or register)
-    message:= Message (object)
-    '''
-    # Create the client socket
-    client_context = zmq.Context()
-    client_sock = client_context.socket(zmq.REQ)
-    assert(action in ('locate', 'check_client', 'register_client', 'enqueue_message'))
-    client_sock.connect("tcp://%s:%d" % (tracker_ip, tracker_port))
-    if action in ('check_client', 'register_client'):
-        client_sock.send_json(
-            {'action': action,
-             'id': kwargs['user'],
-             'ip': kwargs['ip'],
-             'port': kwargs['port']
-             }
-            )
-    elif action == "enqueue_message":
-        message = kwargs['message']
-        marshalled_message = dumps(message)
-        client_sock.send_json(
-            {
-                'action': action,
-                'marshalled': marshalled_message,
-                'ip': kwargs['ip'],
-                'port': kwargs['port'],
-                'id': message.receiver
-            }
-        )
-    # The other posibility is only 'locate'
-    else:
-        client_sock.send_json(
-            {
-                'action': action,
-                'id': kwargs['user']
-            }
-            )
-    # Check if server is responding
-    # clients should test for a server response to know whether
-    # it's active, or is down.
-    tries = 8
-    timeout = 10
-    while tries:
-        if client_sock.poll(timeout=timeout, flags=zmq.POLLIN):
-            break
-        tries -= 1
-        timeout *= 2
-    # No server response
-    if not tries:
-        client_sock.close()
-        print('++++++++++++++')
-        # raise NoResponseException()
-        return None
+# def request_tracker_action(tracker_ip, tracker_port, action, **kwargs):
+#     '''
+#     Tracker request can only contain 3 actions: check_client, register_client\
+#          or locate.
+#     @param tracker_ip   : Known tracker ip to ask to
+#     @param tracker_port : The tracker port where service is active
+#     @param action       : Desire action to execute on the tracker
+#     @kwargs             : Keyword args with the following keys:
+#     user := username to trackto (either to check or register or locate)
+#     ip   := ip of the sender (only needed for check or register)
+#     port := port of the sender service (only needed for check or register)
+#     message:= Message (object)
+#     '''
+#     # Create the client socket
+#     client_context = zmq.Context()
+#     client_sock = client_context.socket(zmq.REQ)
+#     assert(action in ('locate', 'check_client', 'register_client', 'enqueue_message'))
+#     client_sock.connect("tcp://%s:%d" % (tracker_ip, tracker_port))
+#     if action in ('check_client', 'register_client'):
+#         client_sock.send_json(
+#             {'action': action,
+#              'id': kwargs['user'],
+#              'ip': kwargs['ip'],
+#              'port': kwargs['port']
+#              }
+#             )
+#     elif action == "enqueue_message":
+#         message = kwargs['message']
+#         marshalled_message = dumps(message)
+#         client_sock.send_json(
+#             {
+#                 'action': action,
+#                 'marshalled': marshalled_message,
+#                 'ip': kwargs['ip'],
+#                 'port': kwargs['port'],
+#                 'id': message.receiver
+#             }
+#         )
+#     # The other posibility is only 'locate'
+#     else:
+#         client_sock.send_json(
+#             {
+#                 'action': action,
+#                 'id': kwargs['user']
+#             }
+#             )
+#     # Check if server is responding
+#     # clients should test for a server response to know whether
+#     # it's active, or is down.
+#     tries = 8
+#     timeout = 10
+#     while tries:
+#         if client_sock.poll(timeout=timeout, flags=zmq.POLLIN):
+#             break
+#         tries -= 1
+#         timeout *= 2
+#     # No server response
+#     if not tries:
+#         client_sock.close()
+#         print('++++++++++++++')
+#         # raise NoResponseException()
+#         return None
 
-    response = client_sock.recv_pyobj()['response']
-    if isinstance(response, list):
-        rep = []
-        for message in response:
-            rep.append(loads(message))
-        response = rep
+#     response = client_sock.recv_pyobj()['response']
+#     if isinstance(response, list):
+#         rep = []
+#         for message in response:
+#             rep.append(loads(message))
+#         response = rep
 
-    client_sock.close()
-    return response
+#     client_sock.close()
+#     return response
     
 class NoResponseException(Exception):
     pass

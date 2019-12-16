@@ -140,7 +140,10 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
 
     def retranslateUi(self, MainWindow):
         _translate = QtCore.QCoreApplication.translate
-        MainWindow.setWindowTitle(_translate("MainWindow", "WhatsAppP2P - " + self.client.username))        
+        if self.client.registered:
+            MainWindow.setWindowTitle(_translate("MainWindow", "WhatsAppP2P - " + self.client.username))  
+        else:
+            MainWindow.setWindowTitle(_translate("MainWindow", "WhatsAppP2P - not registered"))  
         self.pushButton_send.setText(_translate("MainWindow", "Send"))
         self.label.setText(_translate("MainWindow", "Contacts"))
         self.label_2.setText(_translate("MainWindow", "Contact_Name"))
@@ -226,6 +229,13 @@ class Ui_MainWindow(QtWidgets.QMainWindow):
     def check_regitration(self):
         if not self.client.registered:
             self.dialog.exec_()
+        try:
+            _translate = QtCore.QCoreApplication.translate
+            self.setWindowTitle(_translate("MainWindow", "WhatsAppP2P - " + self.client.username))  
+        except:
+            pass
+             
+        
         
     def show_conversation(self, messg_list):
         self.conversList.clear()
